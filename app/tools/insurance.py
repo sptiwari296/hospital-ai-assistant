@@ -122,12 +122,26 @@ def evaluate_eligibility(conn, pid: str, procedure: dict, service_date: date) ->
     return finish("eligible", amounts)
 
 
+def default_service_date(conn, pid: str, procedure: dict) -> date:
+    """No date given: use the patient's scheduled surgery for this procedure, else today."""
+    if procedure["category"] == "surgery":
+        row = conn.execute(
+            """SELECT s.start_time FROM appointments a JOIN appointment_slots s USING (slot_id)
+               WHERE a.patient_id = %s AND a.appointment_type = 'surgery' AND a.status = 'scheduled'
+                 AND a.department = %s AND s.start_time >= %s ORDER BY s.start_time LIMIT 1""",
+            (pid, procedure["department"], clock.now())).fetchone()
+        if row:
+            return row["start_time"].date()
+    return clock.today()
+
+
 @tool("check_insurance_eligibility", SOURCE)
 def check_insurance_eligibility(ctx: RequestContext, procedure: str, service_date: date | None = None) -> ToolResult:
     pid = require_patient(ctx)
-    service_date = service_date or clock.today()
     with connect() as conn:
-        result = evaluate_eligibility(conn, pid, resolve_procedure(conn, procedure), service_date)
+        proc = resolve_procedure(conn, procedure)
+        service_date = service_date or default_service_date(conn, pid, proc)
+        result = evaluate_eligibility(conn, pid, proc, service_date)
     labels = {"eligible": "Eligible", "requires_pre_authorization": "Covered, but pre-authorisation is required",
               "not_covered": "Not covered", "not_eligible": "Not eligible", "no_active_policy": "No active policy",
               "manual_review": "Needs manual review by the Insurance Desk"}

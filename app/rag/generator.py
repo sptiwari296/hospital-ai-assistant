@@ -1,16 +1,16 @@
-"""Step 7 — Generator (the LLM call).
+"""LLM providers (used by the RAG generator and the intent classifier).
 
-`LLMProvider` is the provider pattern: the RAG service depends on this interface,
-so tests use a fake provider and the model can be swapped without touching the pipeline.
+`LLMProvider` is the provider pattern: callers depend on this interface, so tests use
+fake providers and the model can be swapped without touching the pipeline.
 Two real providers: GroqProvider (default, gpt-oss-120b) and ClaudeProvider.
 Choose with LLM_PROVIDER=groq|claude in .env.
 
-Both use STRUCTURED OUTPUT (a JSON schema): the reply is guaranteed to be valid JSON
-with exactly our fields, so we never parse free text.
+Every call uses STRUCTURED OUTPUT (a strict JSON schema): the reply is guaranteed to be
+valid JSON with exactly the expected fields, so we never parse free text.
 """
 import json
 import os
-from abc import ABC, abstractmethod
+from abc import ABC
 from functools import lru_cache
 
 from app.config import Settings, get_settings
@@ -44,9 +44,19 @@ class LLMError(Exception):
 
 
 class LLMProvider(ABC):
-    @abstractmethod
+    def complete_json(self, system: str, user_message: str, schema: dict, name: str,
+                      effort: str | None = None) -> tuple[dict, str]:
+        """Return (JSON object matching `schema`, name of the model that answered).
+        `effort` overrides the default reasoning effort (e.g. "low" for quick routing)."""
+        raise NotImplementedError
+
     def generate(self, system: str, user_message: str) -> tuple[LLMDraft, str]:
-        """Returns (draft, name of the model that actually answered)."""
+        """RAG answer draft."""
+        data, model = self.complete_json(system, user_message, DRAFT_SCHEMA, "answer_draft")
+        try:
+            return LLMDraft.model_validate(data), model
+        except ValueError as exc:
+            raise LLMError(f"model output did not match the schema: {exc}") from exc
 
 
 class ClaudeProvider(LLMProvider):
@@ -57,7 +67,8 @@ class ClaudeProvider(LLMProvider):
         self._client = anthropic.Anthropic()  # credentials from ANTHROPIC_API_KEY (.env) or `ant auth login`
         self._settings = settings
 
-    def generate(self, system: str, user_message: str) -> tuple[LLMDraft, str]:
+    def complete_json(self, system: str, user_message: str, schema: dict, name: str,
+                      effort: str | None = None) -> tuple[dict, str]:
         a = self._anthropic
         try:
             response = self._client.beta.messages.create(
@@ -66,8 +77,8 @@ class ClaudeProvider(LLMProvider):
                 # Stable system prompt is cached: later questions pay ~10% for these tokens.
                 system=[{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}],
                 messages=[{"role": "user", "content": user_message}],
-                output_config={"effort": self._settings.llm_effort,
-                               "format": {"type": "json_schema", "schema": DRAFT_SCHEMA}},
+                output_config={"effort": effort or self._settings.llm_effort,
+                               "format": {"type": "json_schema", "schema": schema}},
                 # If a safety classifier declines, the API retries on a fallback model automatically.
                 betas=["server-side-fallback-2026-07-01"],
                 fallbacks="default",
@@ -91,9 +102,9 @@ class ClaudeProvider(LLMProvider):
         if text is None:
             raise LLMError("the model returned no text")
         try:
-            return LLMDraft.model_validate(json.loads(text)), response.model
-        except (json.JSONDecodeError, ValueError) as exc:
-            raise LLMError(f"model output did not match the schema: {exc}") from exc
+            return json.loads(text), response.model
+        except json.JSONDecodeError as exc:
+            raise LLMError(f"model output was not valid JSON: {exc}") from exc
 
 
 class GroqProvider(LLMProvider):
@@ -105,24 +116,26 @@ class GroqProvider(LLMProvider):
         from langchain_groq import ChatGroq
 
         self.model = settings.groq_model
-        llm = ChatGroq(model=settings.groq_model, temperature=0, max_retries=2,
-                       reasoning_effort=settings.llm_effort)
-        # include_raw=True gives us the raw message (model name) plus any parsing error
-        schema = {"title": "answer_draft", "description": "Grounded answer with evidence labels", **DRAFT_SCHEMA}
-        self._chain = llm.with_structured_output(schema, method="json_schema", strict=True, include_raw=True)
+        self._settings = settings
+        self._chat_groq = ChatGroq
+        self._chains: dict[tuple[str, str], object] = {}
 
-    def generate(self, system: str, user_message: str) -> tuple[LLMDraft, str]:
+    def complete_json(self, system: str, user_message: str, schema: dict, name: str,
+                      effort: str | None = None) -> tuple[dict, str]:
+        effort = effort or self._settings.llm_effort
+        key = (name, effort)
+        if key not in self._chains:  # one chain per (schema, effort); LangChain needs a title on a raw schema
+            llm = self._chat_groq(model=self.model, temperature=0, max_retries=2, reasoning_effort=effort)
+            titled = {"title": name, "description": f"Structured output: {name}", **schema}
+            self._chains[key] = llm.with_structured_output(titled, method="json_schema", strict=True,
+                                                           include_raw=True)
         try:
-            out = self._chain.invoke([("system", system), ("human", user_message)])
+            out = self._chains[key].invoke([("system", system), ("human", user_message)])
         except Exception as exc:  # network, auth, rate limit, invalid request
             raise LLMError(f"Groq API error: {type(exc).__name__}: {exc}") from exc
         if out.get("parsing_error") or out.get("parsed") is None:
             raise LLMError(f"model output did not match the schema: {out.get('parsing_error')}")
-        try:
-            draft = LLMDraft.model_validate(out["parsed"])
-        except ValueError as exc:
-            raise LLMError(f"model output did not match the schema: {exc}") from exc
-        return draft, out["raw"].response_metadata.get("model_name", self.model)
+        return out["parsed"], out["raw"].response_metadata.get("model_name", self.model)
 
 
 @lru_cache

@@ -46,6 +46,8 @@ class Settings:
     groq_model: str = field(default_factory=lambda: os.getenv("GROQ_MODEL", "openai/gpt-oss-120b"))
     llm_model: str = field(default_factory=lambda: os.getenv("LLM_MODEL", "claude-opus-5-5"))
     llm_effort: str = field(default_factory=lambda: os.getenv("LLM_EFFORT", "medium"))
+    # Routing is an easy task: low reasoning effort keeps the classifier fast
+    classifier_effort: str = field(default_factory=lambda: os.getenv("CLASSIFIER_EFFORT", "low"))
 
 
 @lru_cache

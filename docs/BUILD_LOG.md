@@ -157,3 +157,50 @@ Query pipeline (`app/rag/service.py`):
 2. **Staff saw "Your appointments"** for a patient's record. The wording now depends on the role.
 3. **Reference ranges printed as "70.00–99.00"** (database NUMERIC). They're now formatted as "70–99".
 4. **Windows had no timezone database** for `zoneinfo`. Added `tzdata`.
+
+## Phase 5: AI orchestrator
+**Output:** `app/orchestrator/*` (models, classifier, routing, workflows, composer, service), `scripts/chat.py`, `tests/test_orchestrator.py`
+
+```
+message ─► pending confirmation?  user's own yes/no executes or declines   (no LLM)
+        ─► safety pre-checks      emergency wording, another patient's id  (no LLM)
+        ─► option reply?          "2" / "the first one" picks an offered slot (no LLM)
+        ─► LLM intent classifier  structured proposal (strict JSON schema)
+        ─► routing policy         backend validates the proposal and permissions
+        ─► execute                RAG | tools | appointment workflow | surgery-readiness plan
+        ─► composer               one structured response: answer_type, citations, tools, plan, trace_id
+```
+
+| Component | Implementation | Why |
+|---|---|---|
+| Intent classifier | Same LLM provider, strict JSON schema with the brief's fields (`intent, requires_authentication, requires_rag, requires_tools, tools, requires_confirmation`) plus `tool_calls` with JSON arguments, `rag_query`, `target_hint`, `procedure`. 15 intents. Tool catalogue **generated from the registry** | Structured routing instead of free-form reasoning. The prompt can't drift from the real tools. Low reasoning effort keeps it fast |
+| Safety pre-checks | Regex for emergencies; any `P####` id other than the user's own | Highest-risk cases never depend on the LLM |
+| Routing policy | Per-intent tool allow-list; unknown or off-intent tools dropped; max 5 calls; patient-data intents need an authorised patient in the session (staff must select an assigned patient); write tools **always** require confirmation; defaults (e.g. `get_bills`); every change recorded in `routing_notes` | "The classification is not an authorization decision": the backend decides |
+| Appointment workflow | Multi-turn: match the target appointment from `target_hint` → offer slots (stored in `Session`) → user picks → `reschedule_appointment` (only an **offered** slot is accepted) → proposal → the user's "yes" → `confirm_action` → verified | The LLM never picks arbitrary slots and never approves |
+| Surgery-readiness plan | Fixed plan (PDF steps 1–7) in dependency order: surgeon/schedule → pre-op tests (validity vs surgery date) → insurance **for the surgery date** → checklist → deterministic combine into Done / Still open → escalation to surgeon and anaesthesiologist | A structured, auditable plan, not an uncontrolled chain of reasoning |
+| Composer | Tool parts use the tools' deterministic summaries (the LLM never rewrites numbers). RAG parts keep validated citations. Tool references like `DOC003 §4.1` become full citations from the `documents` table. `answer_type` priority: refused > action_completed > conflict_flagged > clarification_needed > calculated > retrieved_fact > not_found | Every response is one of the 7 categories, with real sources |
+| Session | Short history, offered slots, pending confirmation | Lets "option 2", "yes" and follow-ups work. Phase 6 persists it |
+
+**Live conversation** (`scripts/chat.py rahul.sharma --demo`, Groq gpt-oss-120b)
+
+| User says | Result |
+|---|---|
+| Hi | `clarification_needed`: lists capabilities |
+| What are the ICU visiting hours? | `retrieved_fact`: 10:30–11:30, 17:00–19:00 (DOC012 §3) |
+| What is my latest blood sugar reading? | `calculated`: 132 mg/dL, flagged HIGH by the lab, no diagnosis, **0.9 s** |
+| Am I covered for knee replacement? | `calculated`: needs pre-authorisation (pending), ₹2,40,000 / ₹60,000, for the **scheduled date 26 Nov**, **1.7 s** |
+| Can I proceed with surgery next week? | 4-step plan, 5 done / 7 open, escalated to surgeon and anaesthesiologist, cites DOC003 §4.1–§5 and DOC007 §3.2 |
+| Can I take ibuprofen with my current medicines? | `calculated`: no formulary interaction with metformin/atorvastatin, "does not guarantee it is safe" |
+| Show me the lab results of patient P1003 | `refused` in **0 ms** (pre-check, no LLM) |
+| Should I stop taking metformin before my surgery? | `refused`: no medical advice, refers to the doctor |
+| Reschedule my cardiology appointment → "the first one" → "no" | 6 options offered → proposal "Nothing has been changed yet" (**52 ms**, no LLM) → "OK, nothing was changed" |
+| Do you treat snake bites? | `not_found` |
+
+**Tests:** 99 in total, 17 new for the orchestrator, using a **scripted classifier** to fix what the LLM proposes. They cover: RAG / tool / mixed pathways; an off-intent write tool dropped; confirmation forced for writes; admin refused; staff must select a patient; classifier failure handled; emergency and other-patient refusals **without calling the classifier**; medical advice refused; the full 3-turn reschedule (DB unchanged until "yes", then verified); decline; ordinal option picking with no second LLM call; insurance defaulting to the scheduled surgery date; a non-offered slot rejected; and the surgery-readiness plan's step order, insurance date, open-item count, escalation and citations.
+
+**Problems found and fixed**
+1. **"Am I covered for knee replacement?" got a counter-question** asking for a date. Fixed in three places: a prompt rule (never ask for dates), a routing default that adds the eligibility tool for the named procedure, and the tool now defaults to the **scheduled surgery date**.
+2. **"the first one" needed an LLM call (18 s).** The deterministic option parser now understands ordinals: 52 ms.
+3. **Code names leaked into text** ("requires pre authorization", "HbA1c 7.20 %"). Proper labels and number formatting.
+4. **Uneven latency (1–15 s).** Timing the classifier alone showed **0.8 s per call**; the spikes were **Groq free-tier rate limits (HTTP 429)** with automatic retry and back-off. The classifier now runs at low reasoning effort (`CLASSIFIER_EFFORT`). Retries are capped, and an exhausted retry returns "temporarily unavailable" rather than an error. A paid tier removes the spikes.
+5. Refactor: `LLMProvider.complete_json()` now serves any schema and effort, so the RAG generator and the classifier share one provider.

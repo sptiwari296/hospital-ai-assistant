@@ -7,7 +7,7 @@ from app.db import connect
 from app.tools.base import (RequestContext, ToolInputError, ToolResult, fmt_date, inr, money, require_patient,
                             tool)
 from app.tools.catalog import resolve_procedure
-from app.tools.insurance import evaluate_eligibility
+from app.tools.insurance import default_service_date, evaluate_eligibility
 
 SOURCE = "Hospital Billing System"
 
@@ -64,9 +64,9 @@ def get_payment_status(ctx: RequestContext, invoice_id: str) -> ToolResult:
 @tool("calculate_estimated_bill", SOURCE)
 def calculate_estimated_bill(ctx: RequestContext, procedure: str, service_date: date | None = None) -> ToolResult:
     pid = require_patient(ctx)
-    service_date = service_date or clock.today()
     with connect() as conn:
         proc = resolve_procedure(conn, procedure)
+        service_date = service_date or default_service_date(conn, pid, proc)
         elig = evaluate_eligibility(conn, pid, proc, service_date)
     status = elig["eligibility_status"]
     charge = elig["hospital_charge"]

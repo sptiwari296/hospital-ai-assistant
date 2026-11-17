@@ -67,10 +67,10 @@ def _test_status(conn, pid: str, req: dict, order: dict | None, reference_date: 
                               ORDER BY collected_at DESC LIMIT 1""", (pid,)).fetchone()
         if lab and lab["value"] >= 8:
             return item | {"status": "rule_not_met", "order_id": order["order_id"],
-                           "detail": f"HbA1c {lab['value']} % is not below 8.0 % (result {lab['result_id']})"}
+                           "detail": f"HbA1c {float(lab['value']):g} % is not below 8.0 % (result {lab['result_id']})"}
         if lab:
             return item | {"status": "done", "order_id": order["order_id"],
-                           "detail": f"done {fmt_date(done)}; HbA1c {lab['value']} % meets the < 8.0 % rule"}
+                           "detail": f"done {fmt_date(done)}; HbA1c {float(lab['value']):g} % meets the < 8.0 % rule"}
     return item | {"status": "done", "order_id": order["order_id"], "detail": f"done {fmt_date(done)}"}
 
 
