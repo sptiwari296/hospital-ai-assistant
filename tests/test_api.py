@@ -10,7 +10,7 @@ from app import clock
 from app.api.main import app
 from app.api.routes.chat import get_orchestrator
 from app.config import get_settings
-from app.db import connect
+from app.db import admin_connect as connect  # fixtures need the owner role (bypasses RLS)
 from app.orchestrator.classifier import IntentClassifier
 from app.orchestrator.models import IntentClassification, ProposedToolCall
 from app.orchestrator.service import Orchestrator

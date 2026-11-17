@@ -76,7 +76,7 @@ def _check_new_slot(conn, appt: dict, slot_id: int, lock: bool = False) -> dict:
 @tool("get_appointments", SOURCE)
 def get_appointments(ctx: RequestContext, include_past: bool = False) -> ToolResult:
     pid = require_patient(ctx)
-    with connect() as conn:
+    with connect(pid) as conn:
         rows = conn.execute(APPT_SQL + " WHERE a.patient_id = %s"
                             + ("" if include_past else " AND a.status = 'scheduled' AND s.start_time >= %s")
                             + " ORDER BY s.start_time", (pid,) if include_past else (pid, clock.now())).fetchall()
@@ -101,7 +101,7 @@ def get_available_slots(ctx: RequestContext, appointment_id: str | None = None, 
     if date_from:
         start = max(start, datetime.combine(date_from, time.min))
     end_day = date_to or (start.date() + timedelta(days=14))
-    with connect() as conn:
+    with connect(pid) as conn:
         if appointment_id:
             appt = _own_appointment(conn, pid, appointment_id)
             _check_changeable(appt)
@@ -154,7 +154,7 @@ def _propose(conn, ctx: RequestContext, pid: str, action: str, params: dict, sum
 @tool("reschedule_appointment", SOURCE)
 def reschedule_appointment(ctx: RequestContext, appointment_id: str, slot_id: int) -> ToolResult:
     pid = require_patient(ctx)
-    with connect() as conn:
+    with connect(pid) as conn:
         appt = _own_appointment(conn, pid, appointment_id)
         _check_changeable(appt)
         slot = _check_new_slot(conn, appt, slot_id)
@@ -167,7 +167,7 @@ def reschedule_appointment(ctx: RequestContext, appointment_id: str, slot_id: in
 @tool("cancel_appointment", SOURCE)
 def cancel_appointment(ctx: RequestContext, appointment_id: str) -> ToolResult:
     pid = require_patient(ctx)
-    with connect() as conn:
+    with connect(pid) as conn:
         appt = _own_appointment(conn, pid, appointment_id)
         _check_changeable(appt)
         summary = f"Cancel your {appt['department']} appointment on {fmt_dt(appt['start_time'])} with {appt['doctor']}."
@@ -193,7 +193,7 @@ def _load_pending(conn, ctx: RequestContext, confirmation_id: str) -> dict:
 def confirm_action(ctx: RequestContext, confirmation_id: str) -> ToolResult:
     """Execute a previously proposed change. Called ONLY after the user explicitly says yes."""
     pid = require_patient(ctx)
-    with connect() as conn:
+    with connect(pid) as conn:
         pending = _load_pending(conn, ctx, confirmation_id)
         params, action = pending["params"], pending["action"]
         try:
@@ -242,8 +242,8 @@ def confirm_action(ctx: RequestContext, confirmation_id: str) -> ToolResult:
 
 @tool("decline_action", SOURCE)
 def decline_action(ctx: RequestContext, confirmation_id: str) -> ToolResult:
-    require_patient(ctx)
-    with connect() as conn:
+    pid = require_patient(ctx)
+    with connect(pid) as conn:
         _load_pending(conn, ctx, confirmation_id)
         conn.execute("UPDATE pending_actions SET status = 'declined', executed_at = %s WHERE confirmation_id = %s",
                      (clock.now(), confirmation_id))

@@ -2,7 +2,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
-import { api, getToken, Me, setToken } from "@/lib/api";
+import { api, logout, Me } from "@/lib/api";
 
 const LINKS: { href: string; label: string; roles: Me["role"][] }[] = [
   { href: "/chat", label: "Chat", roles: ["patient", "staff"] },
@@ -15,7 +15,7 @@ export default function NavBar() {
   const [me, setMe] = useState<Me | null>(null);
 
   useEffect(() => {
-    if (pathname === "/login" || !getToken()) {
+    if (pathname === "/login") {
       setMe(null);
       return;
     }
@@ -38,7 +38,7 @@ export default function NavBar() {
           <div className="ml-auto flex items-center gap-3 text-sm">
             <span className="text-muted">{me.display_name} · {me.role}</span>
             <button className="rounded border border-border px-2 py-1 hover:bg-background"
-              onClick={() => { setToken(null); window.location.href = "/login"; }}>
+              onClick={logout}>
               Log out
             </button>
           </div>

@@ -17,7 +17,8 @@ def _int(name: str, default: int) -> int:
 
 @dataclass(frozen=True)
 class Settings:
-    database_url: str
+    database_url: str           # application role (least privilege, Row-Level Security applies)
+    admin_database_url: str     # owner role: setup scripts, migrations, test fixtures only
     # --- embeddings ---
     embedding_model: str = "BAAI/bge-small-en-v1.5"  # local, free, 384 dims, max input 512 tokens
     embedding_dim: int = 384
@@ -52,8 +53,13 @@ class Settings:
 
 @lru_cache
 def get_settings() -> Settings:
-    url = os.getenv("DATABASE_URL") or (
-        f"postgresql://{os.getenv('POSTGRES_USER')}:{os.getenv('POSTGRES_PASSWORD')}"
-        f"@localhost:{os.getenv('POSTGRES_PORT', '5432')}/{os.getenv('POSTGRES_DB')}"
-    )
-    return Settings(database_url=url)
+    host = os.getenv("POSTGRES_HOST", "localhost")
+    port, db = os.getenv("POSTGRES_PORT", "5432"), os.getenv("POSTGRES_DB")
+    admin_url = os.getenv("ADMIN_DATABASE_URL") or (
+        f"postgresql://{os.getenv('POSTGRES_USER')}:{os.getenv('POSTGRES_PASSWORD')}@{host}:{port}/{db}")
+    if not os.getenv("DATABASE_URL") and not os.getenv("API_DB_PASSWORD"):
+        # fail closed: never silently fall back to the superuser, which would bypass Row-Level Security
+        raise RuntimeError("API_DB_PASSWORD is not set. Run scripts/setup_security.py (see README).")
+    app_url = os.getenv("DATABASE_URL") or (
+        f"postgresql://{os.getenv('API_DB_USER', 'hospital_api')}:{os.getenv('API_DB_PASSWORD')}@{host}:{port}/{db}")
+    return Settings(database_url=app_url, admin_database_url=admin_url)

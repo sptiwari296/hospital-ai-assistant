@@ -1,6 +1,7 @@
 // Small API client for the FastAPI backend.
-// Note: the token is kept in localStorage for this local prototype; a production
-// deployment would use an httpOnly, Secure cookie instead (see Phase 7).
+// Authentication uses an httpOnly, SameSite=Strict cookie set by the server at login:
+// JavaScript never sees the token, so an XSS bug cannot steal it. Every request sends the
+// X-Requested-With header, which the server requires on cookie-authenticated writes (CSRF defence).
 
 export const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
@@ -48,40 +49,25 @@ export class ApiError extends Error {
   }
 }
 
-const TOKEN_KEY = "hospital_token";
-
-export function getToken(): string | null {
-  try {
-    return localStorage.getItem(TOKEN_KEY);
-  } catch {
-    return null;
-  }
-}
-
-export function setToken(token: string | null) {
-  try {
-    if (token) localStorage.setItem(TOKEN_KEY, token);
-    else localStorage.removeItem(TOKEN_KEY);
-  } catch {
-    /* storage unavailable: user simply logs in again */
-  }
+// Older versions kept the token in localStorage; remove any leftover so it can't be read by scripts.
+if (typeof window !== "undefined") {
+  try { localStorage.removeItem("hospital_token"); } catch { /* storage unavailable */ }
 }
 
 export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   const headers = new Headers(init.headers);
-  const token = getToken();
-  if (token) headers.set("Authorization", `Bearer ${token}`);
+  headers.set("X-Requested-With", "hospital-web");
   if (init.body && !(init.body instanceof FormData)) headers.set("Content-Type", "application/json");
 
   let res: Response;
   try {
-    res = await fetch(`${API_URL}${path}`, { ...init, headers });
+    res = await fetch(`${API_URL}${path}`, { ...init, headers, credentials: "include" });
   } catch {
     throw new ApiError(0, "Cannot reach the server. Is the API running on port 8000?");
   }
-  if (res.status === 401 && !path.startsWith("/api/auth/")) {
-    setToken(null);
-    if (typeof window !== "undefined") window.location.href = "/login";
+  if (res.status === 401 && !path.startsWith("/api/auth/") && typeof window !== "undefined"
+      && window.location.pathname !== "/login") {
+    window.location.href = "/login";
   }
   const body = await res.json().catch(() => null);
   if (!res.ok) {
@@ -92,4 +78,9 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
     throw new ApiError(res.status, message);
   }
   return body as T;
+}
+
+export async function logout() {
+  await api("/api/auth/logout", { method: "POST" }).catch(() => null);
+  window.location.href = "/login";
 }

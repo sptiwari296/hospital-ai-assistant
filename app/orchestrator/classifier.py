@@ -10,6 +10,7 @@ from abc import ABC, abstractmethod
 
 from app import clock
 from app.config import get_settings
+from app.injection import neutralize_tags
 from app.orchestrator.models import INTENTS, IntentClassification, Session
 from app.rag.generator import LLMProvider, get_llm_provider
 from app.tools.registry import TOOLS
@@ -119,7 +120,7 @@ def build_user_message(message: str, session: Session) -> str:
         parts.append("OFFERED SLOTS for appointment " + session.offered_slots["appointment_id"] + ":\n" + "\n".join(
             f"option {i}: slot_id {s['slot_id']} = {s['display_time']} with {s['doctor']}"
             for i, s in enumerate(session.offered_slots["slots"], start=1)))
-    parts.append(f"<user_message>\n{message}\n</user_message>")
+    parts.append(f"<user_message>\n{neutralize_tags(message)}\n</user_message>")
     return "\n\n".join(parts)
 
 

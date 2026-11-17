@@ -1,17 +1,13 @@
 "use client";
 import { useEffect, useState } from "react";
-import { api, getToken, Me } from "./api";
+import { api, Me } from "./api";
 
-/** Loads the logged-in user; redirects to /login when there is no valid session. */
+/** Loads the logged-in user (cookie session); the API client redirects to /login on 401. */
 export function useMe(allowed?: Me["role"][]) {
   const [me, setMe] = useState<Me | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!getToken()) {
-      window.location.href = "/login";
-      return;
-    }
     api<Me>("/api/me")
       .then((user) => {
         if (allowed && !allowed.includes(user.role)) setError("Your role cannot open this page.");

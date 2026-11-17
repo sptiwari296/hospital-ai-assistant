@@ -126,7 +126,7 @@ def _proposal_part(session: Session, result: ToolResult) -> Part:
 
 # ---------------------------------------------------------------- surgery readiness (PDF multi-step scenario)
 def _planned_procedure(session: Session) -> str | None:
-    with connect() as conn:
+    with connect(session.ctx.patient_id) as conn:
         row = conn.execute("""SELECT item_code FROM medical_orders WHERE patient_id = %s AND order_type = 'procedure'
                               AND status IN ('ordered', 'in_progress') ORDER BY ordered_at DESC LIMIT 1""",
                            (session.ctx.patient_id,)).fetchone()

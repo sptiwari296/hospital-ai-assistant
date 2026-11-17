@@ -1,6 +1,6 @@
 "use client";
 import { FormEvent, useState } from "react";
-import { api, Me, setToken } from "@/lib/api";
+import { api, Me } from "@/lib/api";
 
 const DEMO_USERS = [
   ["rahul.sharma", "Patient – knee surgery planned"],
@@ -21,10 +21,10 @@ export default function LoginPage() {
     setBusy(true);
     setError(null);
     try {
-      const res = await api<{ access_token: string; user: Me }>("/api/auth/login", {
+      // the server sets the httpOnly session cookie; the token in the body is ignored on purpose
+      const res = await api<{ user: Me }>("/api/auth/login", {
         method: "POST", body: JSON.stringify({ username, password }),
       });
-      setToken(res.access_token);
       window.location.href = res.user.role === "doc_admin" ? "/admin" : "/chat";
     } catch (err) {
       setError((err as Error).message);

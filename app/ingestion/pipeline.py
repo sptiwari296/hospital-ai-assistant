@@ -19,6 +19,7 @@ from app.ingestion.embeddings import Embedder, get_embedder
 from app.ingestion.extract import extract_blocks
 from app.ingestion.models import DocumentMetadata, IngestionReport
 from app.ingestion.validation import ValidationError, validate_file
+from app.injection import scan
 
 
 def ingest_document(file_path: str | Path, meta: DocumentMetadata, uploaded_by: str,
@@ -59,6 +60,18 @@ def ingest_document(file_path: str | Path, meta: DocumentMetadata, uploaded_by: 
             return finish("rejected", "file type does not match metadata document_name")
         steps.append("validated")
 
+        # --- Steps 2–3: extract and clean
+        blocks = clean_blocks(extract_blocks(file_path))
+        steps.append(f"extracted_{len(blocks)}_blocks")
+
+        # --- Security: prompt-injection scan (R8). Suspicious documents are quarantined as drafts:
+        # stored for review, but never searchable until an administrator approves them.
+        quarantine = ""
+        if (found := scan("\n".join(b.text for b in blocks))) and meta.approval_status == "approved":
+            meta = meta.model_copy(update={"approval_status": "draft"})
+            quarantine = f"QUARANTINED as draft for review - instruction-like text found: {found}"
+            steps.append("quarantined")
+
         existing = store.find_document_by_checksum(conn, checksum)
         if existing and existing != meta.document_id:
             return finish("duplicate", f"identical file already stored as {existing}")
@@ -68,11 +81,9 @@ def ingest_document(file_path: str | Path, meta: DocumentMetadata, uploaded_by: 
                 store.upsert_document(conn, meta, _relative(file_path, settings), checksum)
                 superseded = store.refresh_lineage(conn, meta.lineage_id)
             steps.append("metadata_updated")
-            return finish("unchanged", "content unchanged; metadata refreshed", superseded=superseded)
+            return finish("unchanged", quarantine or "content unchanged; metadata refreshed", superseded=superseded)
 
-        # --- Steps 2–4: extract, clean, chunk
-        blocks = clean_blocks(extract_blocks(file_path))
-        steps.append(f"extracted_{len(blocks)}_blocks")
+        # --- Step 4: chunk
         chunks = chunk_document(blocks, meta.title, settings.chunk_max_tokens,
                                 settings.chunk_overlap_tokens, settings.min_preamble_tokens)
         if not chunks:
@@ -91,7 +102,7 @@ def ingest_document(file_path: str | Path, meta: DocumentMetadata, uploaded_by: 
             store.replace_chunks(conn, meta.document_id, chunks, vectors)
             superseded = store.refresh_lineage(conn, meta.lineage_id)
         steps.append("indexed")
-        msg = f"superseded {', '.join(superseded)}" if superseded else ""
+        msg = "; ".join(m for m in (quarantine, f"superseded {', '.join(superseded)}" if superseded else "") if m)
         return finish("ingested", msg, chunks=len(chunks), superseded=superseded, model=embedder.name)
 
 

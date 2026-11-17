@@ -47,7 +47,7 @@ def _row(r: dict) -> dict:
 def get_lab_results(ctx: RequestContext, test_name: str, limit: int = 5) -> ToolResult:
     pid = require_patient(ctx)
     code = resolve_test(test_name)
-    with connect() as conn:
+    with connect(pid) as conn:
         rows = conn.execute("""SELECT * FROM lab_results WHERE patient_id = %s AND test_code = %s
                                ORDER BY collected_at DESC LIMIT %s""", (pid, code, max(1, min(limit, 20)))).fetchall() \
             if code else []
@@ -81,7 +81,7 @@ def get_latest_lab_result(ctx: RequestContext, test_name: str) -> ToolResult:
 @tool("get_radiology_reports", RIS)
 def get_radiology_reports(ctx: RequestContext, limit: int = 5) -> ToolResult:
     pid = require_patient(ctx)
-    with connect() as conn:
+    with connect(pid) as conn:
         rows = conn.execute("""SELECT r.*, d.full_name AS radiologist FROM radiology_reports r
                                LEFT JOIN doctors d ON d.doctor_id = r.radiologist_id
                                WHERE r.patient_id = %s ORDER BY performed_at DESC LIMIT %s""",

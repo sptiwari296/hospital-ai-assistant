@@ -1,8 +1,13 @@
-"""Authentication: password hashing, JWT access tokens, and FastAPI dependencies.
+"""Authentication: password hashing, JWT access tokens, cookies, lockout, and FastAPI dependencies.
 
-* Passwords: salted PBKDF2-SHA256 (Python standard library), constant-time comparison.
-* Tokens: signed JWT (HS256) with the user id and role, expiring after 8 hours.
-* Every request re-reads the user from the database, so a deactivated user is locked out at once.
+* Passwords: salted PBKDF2-SHA256 (standard library), constant-time comparison.
+* Tokens: signed JWT (HS256), 8 hours. The browser receives it in an httpOnly, SameSite=Strict
+  cookie that JavaScript cannot read (an XSS bug cannot steal it). API clients may send
+  "Authorization: Bearer <token>" instead.
+* CSRF: a request authenticated by COOKIE that changes data must carry the header
+  X-Requested-With: hospital-web. Other sites cannot add custom headers cross-origin.
+* Lockout: 5 failed logins lock the account for 15 minutes.
+* Every request re-reads the user, so deactivation and lockout apply immediately.
 """
 import base64
 import hashlib
@@ -13,7 +18,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
 import jwt
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Request, Response, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from app.db import connect
@@ -21,7 +26,12 @@ from app.db import connect
 ITERATIONS = 200_000
 TOKEN_HOURS = 8
 ALGORITHM = "HS256"
+COOKIE_NAME = "hs_session"
+CSRF_HEADER, CSRF_VALUE = "X-Requested-With", "hospital-web"
+MAX_FAILED_LOGINS, LOCK_MINUTES = 5, 15
+SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
 bearer = HTTPBearer(auto_error=False)
+_DUMMY_HASH = None
 
 
 def _secret() -> str:
@@ -57,15 +67,32 @@ class CurrentUser:
     patient_id: str | None
 
 
-def authenticate(username: str, password: str) -> CurrentUser | None:
+def authenticate(username: str, password: str) -> tuple[CurrentUser | None, str]:
+    """Returns (user, outcome) where outcome is 'success', 'invalid' or 'locked'."""
+    global _DUMMY_HASH
     with connect() as conn:
-        row = conn.execute("""SELECT user_id, auth_subject, role, display_name, patient_id, password_hash, is_active
-                              FROM users WHERE auth_subject = %s""", (username.strip().lower(),)).fetchone()
-    # verify even when the user is unknown, so response time doesn't reveal which usernames exist
-    ok = verify_password(password, row["password_hash"] if row else hash_password("dummy-password"))
-    if not row or not ok or not row["is_active"]:
-        return None
-    return CurrentUser(row["user_id"], row["auth_subject"], row["role"], row["display_name"], row["patient_id"])
+        row = conn.execute(
+            """SELECT user_id, auth_subject, role, display_name, patient_id, password_hash, is_active,
+                      (locked_until IS NOT NULL AND locked_until > now()) AS is_locked
+               FROM users WHERE auth_subject = %s""", (username.strip().lower(),)).fetchone()
+        # always run the slow hash, so response time doesn't reveal whether the user exists
+        _DUMMY_HASH = _DUMMY_HASH or hash_password(secrets.token_hex(8))
+        ok = verify_password(password, row["password_hash"] if row else _DUMMY_HASH)
+        if not row or not row["is_active"]:
+            return None, "invalid"
+        if row["is_locked"]:
+            return None, "locked"
+        if not ok:
+            conn.execute(
+                """UPDATE users SET failed_login_count = failed_login_count + 1,
+                          locked_until = CASE WHEN failed_login_count + 1 >= %s
+                                              THEN now() + make_interval(mins => %s) ELSE locked_until END
+                   WHERE user_id = %s""", (MAX_FAILED_LOGINS, LOCK_MINUTES, row["user_id"]))
+            return None, "invalid"
+        conn.execute("UPDATE users SET failed_login_count = 0, locked_until = NULL WHERE user_id = %s",
+                     (row["user_id"],))
+    return CurrentUser(row["user_id"], row["auth_subject"], row["role"], row["display_name"], row["patient_id"]), \
+        "success"
 
 
 def create_token(user: CurrentUser) -> str:
@@ -75,21 +102,38 @@ def create_token(user: CurrentUser) -> str:
     return jwt.encode(claims, _secret(), algorithm=ALGORITHM)
 
 
-def current_user(credentials: HTTPAuthorizationCredentials | None = Depends(bearer)) -> CurrentUser:
+def set_session_cookie(response: Response, token: str) -> None:
+    response.set_cookie(COOKIE_NAME, token, max_age=TOKEN_HOURS * 3600, httponly=True, samesite="strict",
+                        secure=os.getenv("COOKIE_SECURE", "false").lower() == "true", path="/")
+
+
+def clear_session_cookie(response: Response) -> None:
+    response.delete_cookie(COOKIE_NAME, path="/")
+
+
+def current_user(request: Request,
+                 credentials: HTTPAuthorizationCredentials | None = Depends(bearer)) -> CurrentUser:
     unauthorized = HTTPException(status.HTTP_401_UNAUTHORIZED, "Not authenticated",
                                  headers={"WWW-Authenticate": "Bearer"})
-    if credentials is None:
+    token = credentials.credentials if credentials else request.cookies.get(COOKIE_NAME)
+    if not token:
         raise unauthorized
+    if credentials is None and request.method not in SAFE_METHODS \
+            and request.headers.get(CSRF_HEADER) != CSRF_VALUE:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Missing CSRF header")
     try:
-        claims = jwt.decode(credentials.credentials, _secret(), algorithms=[ALGORITHM])
+        claims = jwt.decode(token, _secret(), algorithms=[ALGORITHM])
     except jwt.PyJWTError:
         raise unauthorized from None
     with connect() as conn:
-        row = conn.execute("""SELECT user_id, auth_subject, role, display_name, patient_id, is_active
+        row = conn.execute("""SELECT user_id, auth_subject, role, display_name, patient_id, is_active,
+                                     (locked_until IS NOT NULL AND locked_until > now()) AS is_locked
                               FROM users WHERE auth_subject = %s""", (claims.get("sub"),)).fetchone()
-    if not row or not row["is_active"] or row["user_id"] != claims.get("uid"):
+    if not row or not row["is_active"] or row["is_locked"] or row["user_id"] != claims.get("uid"):
         raise unauthorized
-    return CurrentUser(row["user_id"], row["auth_subject"], row["role"], row["display_name"], row["patient_id"])
+    user = CurrentUser(row["user_id"], row["auth_subject"], row["role"], row["display_name"], row["patient_id"])
+    request.state.audit_user = user            # picked up by the audit middleware
+    return user
 
 
 def require_role(*roles: str):

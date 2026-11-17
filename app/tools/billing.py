@@ -32,7 +32,7 @@ def _bills(conn, pid: str, invoice_id: str | None = None) -> list[dict]:
 @tool("get_bills", SOURCE)
 def get_bills(ctx: RequestContext) -> ToolResult:
     pid = require_patient(ctx)
-    with connect() as conn:
+    with connect(pid) as conn:
         bills = _bills(conn, pid)
     if not bills:
         return ToolResult(tool="get_bills", status="not_found", answer_type="not_found", source=SOURCE,
@@ -49,7 +49,7 @@ def get_bills(ctx: RequestContext) -> ToolResult:
 @tool("get_payment_status", SOURCE)
 def get_payment_status(ctx: RequestContext, invoice_id: str) -> ToolResult:
     pid = require_patient(ctx)
-    with connect() as conn:
+    with connect(pid) as conn:
         bills = _bills(conn, pid, invoice_id.strip().upper())
     if not bills:  # not found and not-yours look the same
         raise ToolInputError(f"Invoice {invoice_id} was not found in your records.")
@@ -64,7 +64,7 @@ def get_payment_status(ctx: RequestContext, invoice_id: str) -> ToolResult:
 @tool("calculate_estimated_bill", SOURCE)
 def calculate_estimated_bill(ctx: RequestContext, procedure: str, service_date: date | None = None) -> ToolResult:
     pid = require_patient(ctx)
-    with connect() as conn:
+    with connect(pid) as conn:
         proc = resolve_procedure(conn, procedure)
         service_date = service_date or default_service_date(conn, pid, proc)
         elig = evaluate_eligibility(conn, pid, proc, service_date)

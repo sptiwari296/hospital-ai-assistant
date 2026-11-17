@@ -6,7 +6,7 @@ from datetime import datetime
 import pytest
 
 from app import clock
-from app.db import connect
+from app.db import admin_connect as connect  # fixtures need the owner role (bypasses RLS)
 from app.orchestrator.classifier import IntentClassifier
 from app.orchestrator.models import IntentClassification, ProposedToolCall, Session
 from app.orchestrator.service import Orchestrator

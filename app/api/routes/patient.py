@@ -1,10 +1,11 @@
 """Patient-data endpoints for the dashboard. Every one runs the SAME authorised tools as the chat."""
 from datetime import date
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
 
 from app.api.auth import CurrentUser, current_user
+from app.crypto import decrypt
 from app.db import connect
 from app.tools import appointments, billing, insurance, labs
 from app.tools.base import AuthorizationError, RequestContext, ToolResult, build_context, mask, require_patient
@@ -13,11 +14,14 @@ router = APIRouter(prefix="/api")
 STATUS_CODES = {"denied": 403, "invalid": 400}
 
 
-def patient_context(user: CurrentUser = Depends(current_user),
+def patient_context(request: Request, user: CurrentUser = Depends(current_user),
                     patient_id: str | None = Query(None, description="Staff only: an assigned patient")) -> RequestContext:
+    request.state.audit_requested_patient = patient_id     # recorded even when access is refused
     try:
-        ctx = build_context(user.auth_subject, acting_for_patient=patient_id if user.role == "staff" else None)
+        ctx = build_context(user.auth_subject, acting_for_patient=patient_id if user.role == "staff" else None,
+                            trace_id=request.state.trace_id)
         require_patient(ctx)
+        request.state.audit_patient = ctx.patient_id
         return ctx
     except AuthorizationError as exc:
         raise HTTPException(403, str(exc)) from None
@@ -31,7 +35,7 @@ def respond(result: ToolResult) -> ToolResult:
 
 @router.get("/patient/profile")
 def profile(ctx: RequestContext = Depends(patient_context)):
-    with connect() as conn:
+    with connect(ctx.patient_id) as conn:
         p = conn.execute("SELECT * FROM patients WHERE patient_id = %s", (ctx.patient_id,)).fetchone()
         policy = conn.execute(
             """SELECT pl.provider, pl.plan_name, p.policy_number, p.valid_to, p.status
@@ -39,7 +43,9 @@ def profile(ctx: RequestContext = Depends(patient_context)):
                WHERE p.patient_id = %s ORDER BY p.valid_to DESC LIMIT 1""", (ctx.patient_id,)).fetchone()
     return {"patient_id": p["patient_id"], "full_name": p["full_name"], "dob": p["dob"], "gender": p["gender"],
             "blood_group": p["blood_group"], "allergies": p["allergies"],
-            "phone": mask(p["phone"]), "email": mask(p["email"], keep=12), "national_id": mask(p["national_id"]),
+            "phone": mask(p["phone"]), "email": mask(p["email"], keep=12),
+            # stored encrypted at rest; decrypted only to show the last 4 digits
+            "national_id": mask(decrypt(p["national_id_encrypted"]) or p["national_id"]),
             "insurance": {**policy, "policy_number": mask(policy["policy_number"], keep_prefix=True)} if policy else None}
 
 
@@ -88,7 +94,7 @@ def lab_results(test: str | None = None, limit: int = Query(5, ge=1, le=20),
                 ctx: RequestContext = Depends(patient_context)):
     if test:
         return respond(labs.get_lab_results(ctx, test, limit))
-    with connect() as conn:  # dashboard overview: latest result of each test
+    with connect(ctx.patient_id) as conn:  # dashboard overview: latest result of each test
         rows = conn.execute(
             """SELECT DISTINCT ON (test_code) result_id, test_code, test_name, value, unit, ref_low, ref_high, flag,
                       collected_at FROM lab_results WHERE patient_id = %s

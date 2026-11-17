@@ -25,7 +25,7 @@ def _scheduled_surgery(conn, pid: str, procedure: dict) -> dict | None:
 @tool("get_pending_orders", SOURCE)
 def get_pending_orders(ctx: RequestContext) -> ToolResult:
     pid = require_patient(ctx)
-    with connect() as conn:
+    with connect(pid) as conn:
         rows = conn.execute("""SELECT o.order_id, o.item_name, o.order_type, o.status, o.ordered_at,
                                       o.related_procedure_code, d.full_name AS ordered_by
                                FROM medical_orders o JOIN doctors d ON d.doctor_id = o.ordered_by
@@ -77,7 +77,7 @@ def _test_status(conn, pid: str, req: dict, order: dict | None, reference_date: 
 @tool("get_preoperative_test_status", SOURCE)
 def get_preoperative_test_status(ctx: RequestContext, procedure: str = "knee replacement") -> ToolResult:
     pid = require_patient(ctx)
-    with connect() as conn:
+    with connect(pid) as conn:
         proc = resolve_procedure(conn, procedure)
         surgery = _scheduled_surgery(conn, pid, proc)
         reference_date = surgery["start_time"].date() if surgery else clock.today()
@@ -109,7 +109,7 @@ def get_preoperative_test_status(ctx: RequestContext, procedure: str = "knee rep
 @tool("get_surgeon_availability", SOURCE)
 def get_surgeon_availability(ctx: RequestContext, procedure: str = "knee replacement", limit: int = 3) -> ToolResult:
     pid = require_patient(ctx)
-    with connect() as conn:
+    with connect(pid) as conn:
         proc = resolve_procedure(conn, procedure)
         surgery = _scheduled_surgery(conn, pid, proc)
         surgeon_filter = (surgery["doctor_id"],) if surgery else None
@@ -138,7 +138,7 @@ def get_surgeon_availability(ctx: RequestContext, procedure: str = "knee replace
 @tool("get_readiness_checklist", SOURCE)
 def get_readiness_checklist(ctx: RequestContext, procedure: str = "knee replacement") -> ToolResult:
     pid = require_patient(ctx)
-    with connect() as conn:
+    with connect(pid) as conn:
         proc = resolve_procedure(conn, procedure)
         rows = conn.execute("""SELECT item_name, status, updated_at FROM procedure_readiness
                                WHERE patient_id = %s AND procedure_code = %s ORDER BY item_code""",

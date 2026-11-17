@@ -138,7 +138,7 @@ def default_service_date(conn, pid: str, procedure: dict) -> date:
 @tool("check_insurance_eligibility", SOURCE)
 def check_insurance_eligibility(ctx: RequestContext, procedure: str, service_date: date | None = None) -> ToolResult:
     pid = require_patient(ctx)
-    with connect() as conn:
+    with connect(pid) as conn:
         proc = resolve_procedure(conn, procedure)
         service_date = service_date or default_service_date(conn, pid, proc)
         result = evaluate_eligibility(conn, pid, proc, service_date)

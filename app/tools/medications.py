@@ -67,7 +67,7 @@ def drug_interaction_check(ctx: RequestContext, medication_list: list[str]) -> T
 @tool("get_active_medications", SOURCE)
 def get_active_medications(ctx: RequestContext) -> ToolResult:
     pid = require_patient(ctx)
-    with connect() as conn:
+    with connect(pid) as conn:
         rows = conn.execute("""SELECT p.prescription_id, m.generic_name, p.dose, p.frequency, p.start_date,
                                       d.full_name AS prescriber
                                FROM prescriptions p JOIN medications m USING (drug_code)
@@ -88,7 +88,7 @@ def get_active_medications(ctx: RequestContext) -> ToolResult:
 def check_new_medication(ctx: RequestContext, medication_list: list[str]) -> ToolResult:
     """'Can I take ibuprofen?' -> check the new medicine(s) against the patient's active prescriptions."""
     pid = require_patient(ctx)
-    with connect() as conn:
+    with connect(pid) as conn:
         active = [r["generic_name"] for r in conn.execute(
             """SELECT m.generic_name FROM prescriptions p JOIN medications m USING (drug_code)
                WHERE p.patient_id = %s AND p.status = 'active'""", (pid,)).fetchall()]

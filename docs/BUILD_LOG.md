@@ -250,3 +250,28 @@ Security decisions:
 5. **Concurrency:** the orchestrator stored per-request state on itself. Moved to the per-request executor.
 
 **Known limits (for Phase 7):** the token is kept in `localStorage` for this prototype (production: httpOnly Secure cookie); no rate limiting or account lockout yet; audit rows store the raw question text (redaction is planned).
+
+## Phase 7: Security, privacy and auditability
+**Output:** `db/init/06_security.sql`, `app/db.py` (scoped connections), `app/crypto.py`, `app/privacy.py`, `app/injection.py`, `app/audit.py`, `app/api/auth.py` + `ratelimit.py` + `main.py` (middleware), `scripts/setup_security.py`, `scripts/redteam.py`, `tests/test_security.py`, **`docs/SECURITY.md`** (requirement → implementation → test)
+
+**What was added**
+1. **Least-privilege DB role + Row-Level Security.** The app used to connect as the Postgres superuser, which bypasses RLS. Now the API connects as `hospital_api` (no superuser, no BYPASSRLS, no DDL, column-level UPDATE grants). 12 patient tables have an RLS policy `patient_id = current_setting('app.patient_id')`, **deny by default**. `connect(patient_id)` sets the scope; every tool passes its session patient. A buggy `WHERE patient_id = 'P1003'` on a P1001 connection returns 0 rows, and an UPDATE touches 0 rows.
+2. **Append-only audit** at the DB level: the API role can INSERT/SELECT `audit_logs` but not UPDATE/DELETE. DROP and DDL are also denied.
+3. **Encryption at rest:** national ID numbers are Fernet-encrypted (`national_id_encrypted`) and the plaintext is removed. The key lives outside the DB.
+4. **Audit per the brief's schema** for *every* request: chat, all authenticated API calls (including refusals, with the requested patient), and login success/failure/lockout. Questions are **redacted**; sources are stored as names; tool records hold no returned values.
+5. **One trace id per HTTP request** (`X-Trace-Id`), shared with the chat answer and the audit row.
+6. **Auth hardening:** an httpOnly SameSite=Strict cookie (the token is no longer in `localStorage`, and leftover tokens are deleted on load); a CSRF header is required for cookie-authenticated writes; lockout after 5 failures (15 min); rate limits (login 10/min per IP, chat 20/min per user); security headers incl. `Cache-Control: no-store` and CSP.
+7. **Prompt injection:** the ingestion scan **quarantines** suspicious documents as `draft`; structural tags in documents and user text are neutralised; metadata attributes are HTML-escaped.
+
+**Verified**
+- DB probe: superuser sees 4 patients; `hospital_api` unscoped sees **0**; scoped to P1001 sees only P1001; DELETE on audit and DROP TABLE are denied.
+- Browser: the session cookie is invisible to JS; the trace in the header equals the trace in the answer; a cookie POST without the CSRF header gets 403.
+- **Live red-team (Groq): 10/10 attacks contained**, with no data leak and no action (see SECURITY.md).
+- **Tests: 130 in total**, 20 new security tests.
+
+**Problems found and fixed**
+1. **RLS caught a real gap on its first run:** the staff "assigned patients" list joined `patients` without a scope and came back empty. Instead of weakening RLS, I added a narrow view (`my_assigned_patients`: id + name, only for the requesting staff user via `app.user_id`).
+2. **The superuser bypasses RLS** even with FORCE. That's why a separate login role was required, and why `config.py` now **fails closed** (raises an error) instead of falling back to the superuser when `API_DB_PASSWORD` is missing.
+3. **A stale Phase 6 token remained in `localStorage`** after the switch to cookies. The client now deletes it on load.
+4. A bulk edit left `decline_action` using an undefined `pid` (caught while reviewing the edit, before running).
+5. Test fixtures that restore seed data now use `admin_connect()`, because the API role is (correctly) not allowed to do that.

@@ -5,7 +5,7 @@ from decimal import Decimal
 import pytest
 
 from app import clock
-from app.db import connect
+from app.db import admin_connect as connect  # fixtures need the owner role (bypasses RLS)
 from app.tools import appointments
 from app.tools.base import AuthorizationError, build_context
 from app.tools.registry import TOOLS, run_tool

@@ -47,9 +47,10 @@ class Orchestrator:
         self.classifier = classifier or LLMIntentClassifier()
         self.rag = rag or RagService()
 
-    def handle(self, session: Session, message: str, decision: str | None = None) -> OrchestratorResponse:
+    def handle(self, session: Session, message: str, decision: str | None = None,
+               trace_id: str | None = None) -> OrchestratorResponse:
         started = time.perf_counter()
-        trace_id = f"HSP-{uuid.uuid4().hex[:8].upper()}"
+        trace_id = trace_id or f"HSP-{uuid.uuid4().hex[:8].upper()}"   # the HTTP layer passes its request trace
         session.ctx = replace(session.ctx, trace_id=trace_id)
         ex = Executor(session)  # all per-request state lives here (the orchestrator is shared between requests)
         notes: list[str] = []

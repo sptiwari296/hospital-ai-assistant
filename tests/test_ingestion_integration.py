@@ -7,7 +7,7 @@ from datetime import date, timedelta
 
 import pytest
 
-from app.db import connect
+from app.db import admin_connect as connect  # fixtures need the owner role (bypasses RLS)
 from app.ingestion.models import DocumentMetadata
 from app.ingestion.pipeline import ingest_document
 

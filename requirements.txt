@@ -20,5 +20,6 @@ pgvector==0.5.1
 pydantic==2.14.3
 python-dotenv==1.2.4
 tzdata  # timezone database for zoneinfo on Windows (hospital clock)
+cryptography==50.0.2  # field-level encryption (Phase 7)
 # Testing
 pytest==9.2.0
