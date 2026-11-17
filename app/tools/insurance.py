@@ -43,7 +43,7 @@ def evaluate_eligibility(conn, pid: str, procedure: dict, service_date: date) ->
     policy = next((p for p in policies if p["valid_from"] <= service_date <= p["valid_to"]
                    and p["status"] != "suspended"), None)
     latest = policies[0]
-    out |= {"plan": f"{latest['provider']} {latest['plan_name']}", "policy_number": mask(latest["policy_number"])}
+    out |= {"plan": f"{latest['provider']} {latest['plan_name']}", "policy_number": mask(latest["policy_number"], keep_prefix=True)}
     if policy is None:
         return finish("not_eligible", f"Your policy is not active on {fmt_date(service_date)} "
                                       f"(valid {fmt_date(latest['valid_from'])} to {fmt_date(latest['valid_to'])}).")

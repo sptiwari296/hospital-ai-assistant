@@ -91,13 +91,15 @@ def tool(name: str, source: str):
 
 
 # ------------------------------------------------------------------ formatting / privacy helpers
-def mask(value: str | None, keep: int = 4) -> str | None:
-    """'NWG-2023-114455' -> 'NWG-****-4455'  (sensitive identifiers are never shown in full)."""
+def mask(value: str | None, keep: int = 4, keep_prefix: bool = False) -> str | None:
+    """Show only the last `keep` characters: '9000-1000-1001' -> '****-****-1001'.
+    keep_prefix=True also keeps a non-sensitive code before the first dash, e.g. an insurer
+    code: 'NWG-2023-114455' -> 'NWG-****-**4455'. Never use it for identity numbers."""
     if not value:
         return value
     tail = value[-keep:]
     head = re.sub(r"[A-Za-z0-9]", "*", value[:-keep])
-    prefix = value.split("-")[0] if "-" in value else ""
+    prefix = value.split("-")[0] if keep_prefix and "-" in value else ""
     return (prefix + head[len(prefix):] if prefix else head) + tail
 
 

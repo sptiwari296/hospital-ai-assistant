@@ -51,8 +51,7 @@ class Orchestrator:
         started = time.perf_counter()
         trace_id = f"HSP-{uuid.uuid4().hex[:8].upper()}"
         session.ctx = replace(session.ctx, trace_id=trace_id)
-        ex = Executor(session)
-        self._rag_model = None
+        ex = Executor(session)  # all per-request state lives here (the orchestrator is shared between requests)
         notes: list[str] = []
         intent, model, parts = "", None, []
 
@@ -110,7 +109,7 @@ class Orchestrator:
             answer = self.rag.answer(query, trace_id=session.ctx.trace_id)
         except LLMError:
             return Part("not_found", "I could not look up the hospital documents right now.")
-        self._rag_model = answer.model
+        ex.rag_model = answer.model
         ex.steps.append(StepRecord(step=len(ex.steps) + 1, name="rag", arguments={"query": query},
                                    status=answer.answer_type, answer_type=answer.answer_type,
                                    latency_ms=int((time.perf_counter() - started) * 1000), summary=answer.answer[:200]))
@@ -149,7 +148,7 @@ class Orchestrator:
             requires_confirmation=bool(c["confirmation"]),
             confirmation_id=c["confirmation"]["confirmation_id"] if c["confirmation"] else None,
             escalation=c["escalation"], conflicts=c["conflicts"], routing_notes=notes,
-            plan=[vars(s) for s in ex.steps], model=model or self._rag_model,
+            plan=[vars(s) for s in ex.steps], model=model or ex.rag_model,
             latency_ms=int((time.perf_counter() - started) * 1000))
         session.remember(message, response.answer)
         return response

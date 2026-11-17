@@ -204,3 +204,49 @@ message ─► pending confirmation?  user's own yes/no executes or declines   (
 3. **Code names leaked into text** ("requires pre authorization", "HbA1c 7.20 %"). Proper labels and number formatting.
 4. **Uneven latency (1–15 s).** Timing the classifier alone showed **0.8 s per call**; the spikes were **Groq free-tier rate limits (HTTP 429)** with automatic retry and back-off. The classifier now runs at low reasoning effort (`CLASSIFIER_EFFORT`). Retries are capped, and an exhausted retry returns "temporarily unavailable" rather than an error. A paid tier removes the spikes.
 5. Refactor: `LLMProvider.complete_json()` now serves any schema and effort, so the RAG generator and the classifier share one provider.
+
+## Phase 6: Backend API and frontend
+**Output:** `app/api/*` (auth, sessions, routes), `app/audit.py`, `db/init/05_api.sql`, `scripts/set_demo_passwords.py`, `web/` (Next.js 15 + React 19 + Tailwind 4), `tests/test_api.py`
+
+**Backend (FastAPI)**
+
+| Endpoint | Who | Purpose |
+|---|---|---|
+| `POST /api/auth/login`, `GET /api/me` | everyone | Login returns a JWT; `me` lists a staff member's assigned patients |
+| `POST /api/chat` | patient, staff | Orchestrator; returns the standard response (`trace_id, answer, answer_type, citations, tools_invoked, explanation, …, session_id`). Confirm/decline buttons send `decision` + `confirmation_id` |
+| `GET /api/chat/{session_id}` | owner | Conversation history and pending confirmation |
+| `GET /api/patient/profile` | patient, staff | Profile with masked phone / email / ID / policy number |
+| `GET /api/appointments`, `GET /api/appointments/{id}/slots` | patient, staff | Same tools as the chat |
+| `POST /api/appointments/reschedule` / `cancel` | patient, staff | **Propose only**, then `POST /api/actions/{confirmation_id}/confirm` or `/decline` |
+| `GET /api/labs`, `POST /api/insurance/verify`, `GET /api/bills` | patient, staff | Dashboard data via the deterministic tools |
+| `POST /api/documents/upload` | doc_admin | Validate metadata → save → `ingestion_jobs` row → **background ingestion** (R11, no restart) → 202 with `job_id` |
+| `GET /api/documents`, `GET /api/documents/jobs[/{id}]`, `PATCH /api/documents/{id}/status` | doc_admin | Versions, "used today", chunk counts, job status; approve / retire (takes effect on the next question) |
+| `GET /api/audit/{trace_id}`, `GET /api/audit` | owner / sys_admin | Audit record per request (R10) |
+
+Security decisions:
+- **Passwords:** salted PBKDF2-SHA256 (200k iterations, standard library), constant-time comparison. Login failures for a wrong password and an unknown user give an identical response. A hash is computed even for unknown users, so timing doesn't reveal which usernames exist.
+- **JWT (HS256, 8 h).** The secret comes from `.env` (rejected if shorter than 32 characters). Every request re-reads the user, so deactivation takes effect immediately.
+- **Identity is rebuilt from the token on every request**, never from the body or the stored session. Chat sessions in Postgres hold only conversation state. Another user's session or trace returns 404 (no information leak).
+- **Confirm buttons must carry the exact pending `confirmation_id`** of that session, otherwise 409.
+- **Uploads:** never read beyond 20 MB (413), filename sanitised, metadata validated by Pydantic (422 with field errors), then the Phase 2 validation (magic bytes, macros, JavaScript…) runs in the background job.
+- **CORS** is limited to the frontend origin.
+- `RequestContext` and the orchestrator are shared across requests, so the per-request RAG model name moved from the orchestrator to the per-request `Executor` (it was a race condition under concurrency).
+
+**Frontend (Next.js)**
+- `/login`: sign in, with the demo account list.
+- `/chat`: suggestions; each answer shows an **answer_type badge**, **sources** (document, section, version, effective date, page, or the source system), the tools chain, the trace id and latency, and an **escalation banner**. Offered slots become **option buttons**; proposals get **Confirm change / Keep as is** buttons. Staff pick an assigned patient first.
+- `/dashboard`: profile (masked), upcoming appointments, latest labs with the lab's flag and a "not a diagnosis" note, bills.
+- `/admin`: upload form (file, title, department, type, lineage with suggestions, version, dates, authority, status), ingestion jobs that **auto-refresh while running**, and the knowledge-base table with "Used today", Approve and Retire.
+
+**Verified in the browser** (logged in through the real login form): surgery-readiness answer with escalation and 5 document citations; reschedule → option button → proposal (34 ms, no LLM) → "Keep as is" → "nothing was changed"; dashboard; admin knowledge base showing DOC011 (superseded) and DOC008 (2027) as not used today.
+
+**Tests:** 110 in total, 11 new API tests. They cover: identical login failures; missing / forged token; staff assigned-patient list; standard chat response shape plus audit visibility (own = yes, other patient = 404, sys_admin = yes); session ownership; confirm button with a wrong id (409) then the correct id (verified change); masked profile; staff scope and admin blocked; labs / insurance / reschedule proposal via REST; only doc_admin can upload; **live upload → background ingestion → searchable immediately → retired → not searchable**; bad metadata (422) and a fake PDF (job rejected).
+
+**Problems found and fixed**
+1. **Privacy bug found in the browser:** the profile showed the ID number as `9000-****-1001`, revealing 8 of 12 digits. `mask()` kept the text before the first dash, which is meant for insurer codes on policy numbers. Keeping the prefix is now opt-in (`keep_prefix=True`, used only for policy numbers); identity numbers show `****-****-1001`. A test pins both formats.
+2. **React crash on the chat page:** `useEffect(() => el.scrollIntoView())` returned what `scrollIntoView` returns, which is a Promise in current Chromium, and React treats a non-function return as a broken cleanup ("destroy is not a function"). Fixed by using a block body.
+3. **ESLint `no-explicit-any` failed the production build.** Added proper types.
+4. **Editing files with Windows PowerShell 5.1 garbled UTF-8** ("–" became "â€"", "✅" became "âœ…"): it read the files as ANSI and wrote them back with a BOM. Repaired by reversing the conversion (cp1252 → UTF-8) and verified with the type-checker and linter. Lesson: edit source files with UTF-8-aware tools only.
+5. **Concurrency:** the orchestrator stored per-request state on itself. Moved to the per-request executor.
+
+**Known limits (for Phase 7):** the token is kept in `localStorage` for this prototype (production: httpOnly Secure cookie); no rate limiting or account lockout yet; audit rows store the raw question text (redaction is planned).

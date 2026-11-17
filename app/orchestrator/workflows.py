@@ -32,6 +32,7 @@ class Executor:
     def __init__(self, session: Session):
         self.session = session
         self.steps: list[StepRecord] = []
+        self.rag_model: str | None = None
 
     def run(self, tool: str, args: dict) -> ToolResult:
         started = time.perf_counter()

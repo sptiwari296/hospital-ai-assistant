@@ -12,7 +12,17 @@ A grounded, secure and auditable AI assistant for hospital patient services (HCL
 | 3 | RAG: hybrid retrieval, reranking, cited answers, conflict rules (`app/rag/`) | ✅ |
 | 4 | Deterministic tools: appointments, insurance, labs, medications, billing, care coordination (`app/tools/`) | ✅ |
 | 5 | AI orchestrator: intent classification, validated routing, multi-step plans, confirmations (`app/orchestrator/`) | ✅ |
-| 6–9 | App (API + UI), security, evaluation, deployment | – |
+| 6 | FastAPI backend with JWT login + Next.js frontend (chat, dashboard, admin uploads) | ✅ |
+| 7–9 | Security hardening, evaluation, deployment | – |
+
+## Run the full application
+```powershell
+docker compose up -d                                             # database
+.venv\Scripts\python scripts\set_demo_passwords.py               # once: hashes DEMO_PASSWORD from .env for all demo users
+.venv\Scripts\uvicorn app.api.main:app --port 8000               # API  -> http://localhost:8000/docs
+cd web; npm install; npm run dev                                 # UI   -> http://localhost:3000
+```
+Log in as `rahul.sharma` (patient), `nurse.anita` (staff), or `admin_01` (documents) with the `DEMO_PASSWORD` from `.env`.
 
 ## Quick start
 ```powershell
