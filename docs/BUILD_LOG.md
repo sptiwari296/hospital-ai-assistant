@@ -66,3 +66,54 @@ Pipeline (`app/ingestion/pipeline.py`):
 - `not_found` needs a similarity threshold, to be calibrated on an evaluation set.
 - The `content_tsv` column is ready for hybrid (keyword + vector) search.
 - R11 upload endpoint: Phase 6 will call `ingest_document()` from a FastAPI admin route.
+
+## Phase 3: RAG (knowledge pathway)
+**Output:** `app/rag/*`, `scripts/ask.py`, `scripts/eval_retrieval.py`, `eval/rag_eval.json`
+
+Query pipeline (`app/rag/service.py`):
+`preprocess → hybrid retrieve (+ metadata filters) → rerank → evidence gate → context → LLM → validate → resolve conflicts → citations`
+
+| Component | Implementation | Why |
+|---|---|---|
+| Query preprocessing | NFKC, whitespace, length cap, medical synonym expansion ("blood sugar" → glucose/HbA1c) **for keyword search only** | Patients and documents use different words. The embedding and the LLM still see the original question |
+| Retriever | **Hybrid:** pgvector cosine search + Postgres full-text OR-search, merged with **Reciprocal Rank Fusion** (k = 60) | Vectors capture meaning. Keywords catch exact terms (HbA1c, PT/INR, Code Blue). RRF merges ranks, so the two score scales never need comparing |
+| Metadata filter | Everything reads from the `searchable_chunks` view (approved + in force + newest version), plus optional department / document-type filters | Mandatory rules 1 and 2 are enforced in the database, not trusted to code paths |
+| Reranker | Local cross-encoder `ms-marco-MiniLM-L-6-v2` (fastembed) on about 20–40 candidates | It reads question and chunk *together*, so it is far more precise than vector similarity alone |
+| Evidence gate | A chunk qualifies if rerank ≥ −4.0 **or** similarity ≥ 0.72. If none qualify → `not_found` **without calling the LLM** | Fail closed, and no tokens are spent on unanswerable questions. Two signals, because the reranker underrates long list-style insurance sections |
+| Authority boost | Qualifying chunks from authority level 1–2 documents are always kept | A government advisory must be seen even when it ranks lower |
+| Context builder | Fixed system prompt (prompt-cached) + `<evidence id="E1" … authority_level=…>` blocks. Evidence is declared data, not instructions | Cheaper repeated calls, plus a first defence against injected instructions in documents (R8) |
+| Generator | `LLMProvider` interface with two implementations, chosen by `LLM_PROVIDER` in `.env`. **`GroqProvider`** (default): `openai/gpt-oss-120b` via LangChain `ChatGroq`, temperature 0, strict JSON-schema output. **`ClaudeProvider`**: `claude-opus-5-5`, structured output, server-side refusal fallback | Structured output guarantees parseable `answer_type / answer / cited_evidence / conflicts`. The interface makes the LLM swappable and lets tests use a fake LLM |
+| Citation validator | Deterministic checks: cited labels exist, factual answers cite ≥ 1 source, **every number in the answer appears in the cited evidence**, conflicts follow R4. One retry with feedback, then `not_found` | The LLM only ever writes labels like "E2". **Citations are built from database metadata** (document, section, version, effective date, page), so they cannot be invented |
+| Conflict resolver (R4) | The LLM *detects* disagreements, but code *decides*: authority → version → effective date → otherwise `conflict_flagged` | Hierarchy is a rule, not a judgement call. The answer must cite the winning source |
+
+**Retrieval evaluation** (free, no LLM): `scripts/eval_retrieval.py` on 25 questions (19 answerable, 6 out of scope)
+- **Gate accuracy: 25/25 (100%).** Retrieval hit rate: **18/19 (95%).** Superseded/future documents retrieved: **0.**
+- Score separation: unanswerable questions reach at best rerank −8.4 / similarity 0.64, while answerable ones pass with clear margins.
+- Known weak spots, kept honest rather than tuned away:
+  - q11 (cosmetic surgery) finds only one of the two insurers' exclusion sections.
+  - q17 (fire) passes only on similarity 0.72, right at the threshold.
+
+**Tests:** 48 in total. 15 unit tests (fusion, gate, R4 rules, validator). 7 end-to-end tests on the real knowledge base with a **scripted fake LLM** covering each path: not_found without an LLM call, metadata citations, an invented citation (retried, then failed closed), a wrong number (corrected on retry), the advisory overriding the hospital policy, an equal-authority conflict flagged, and the department filter.
+
+**Problems found and fixed**
+1. **AND keyword search was useless.** `websearch_to_tsquery` requires every word, so it matched nothing for 5 of 7 test questions. Switched to OR over stemmed lexemes, with ranking doing the rest.
+2. **The vector-only top 5 missed the government advisory** for "ICU visiting hours". Fixed with the reranker plus an authority boost.
+3. **Validator ordering bug** (caught by a test). Numbers were checked before the other side of an unresolved conflict was added to the citations, so "6 hours" from the second document was wrongly treated as made up. Conflicts are now resolved first.
+
+**Live check with Groq gpt-oss-120b** (`scripts/ask.py`), about 2–7 s per answer:
+
+| Question | Result |
+|---|---|
+| ICU visiting hours | `retrieved_fact`: 10:30–11:30 and 17:00–19:00, cites DOC012 v2 §3 (superseded v1 hours never appear) |
+| ICU visitors at a time | **1 visitor**. The government advisory (DOC013, authority 1) overrides the hospital's 2. The conflict is resolved by code, and both sources are cited |
+| MRI fasting with contrast | `conflict_flagged`: 4 h vs 6 h, both documents cited, "confirm with the department" |
+| Knee replacement, Northwind Gold | 80% up to ₹3,50,000, pre-authorisation, 24-month wait, from v2. The future v3 (90%) is correctly ignored |
+| Pre-op tests for knee replacement | Full list with validity windows and the HbA1c < 8% rule for diabetics (DOC003 §4) |
+| Liver transplants | `not_found` without any LLM call |
+
+**More problems found and fixed**
+4. **LangChain needs a `title` on a raw JSON schema** for structured output ("Unsupported function"). Added `title`/`description` on the Groq path.
+5. **Non-breaking hyphens.** The model wrote "pre‑authorisation" with U+2011, which consoles drop ("pre authorisation"). Answers are now normalised to plain hyphens and spaces.
+6. **The overridden source wasn't cited.** The ICU visitor answer cited only the advisory. Resolved conflicts now cite both the winning and the overridden document; the conflict record says which one applies.
+
+**Still open for Phase 8:** a full answer-quality evaluation with the real LLM (accuracy, citation accuracy and latency p50/p95 over the whole eval set).

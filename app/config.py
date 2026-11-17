@@ -32,6 +32,20 @@ class Settings:
     max_pdf_pages: int = 300
     max_docx_uncompressed_bytes: int = 100 * 1024 * 1024  # zip-bomb guard
     storage_dir: Path = ROOT / "data" / "knowledge_base" / "files"
+    # --- RAG (Phase 3) ---
+    retrieval_k: int = 20                     # candidates taken from EACH of vector and keyword search
+    rrf_k: int = 60                           # reciprocal-rank-fusion constant (standard value)
+    rerank_model: str = "Xenova/ms-marco-MiniLM-L-6-v2"  # local cross-encoder
+    max_evidence: int = 6                     # chunks shown to the LLM
+    # Relevance gate (calibrated on eval/rag_eval.json): a chunk counts as evidence if
+    # its rerank score OR its vector similarity is high enough.
+    min_rerank_score: float = field(default_factory=lambda: float(os.getenv("MIN_RERANK_SCORE", -4.0)))
+    min_vector_similarity: float = field(default_factory=lambda: float(os.getenv("MIN_VECTOR_SIMILARITY", 0.72)))
+    # --- LLM ---
+    llm_provider: str = field(default_factory=lambda: os.getenv("LLM_PROVIDER", "groq"))  # "groq" | "claude"
+    groq_model: str = field(default_factory=lambda: os.getenv("GROQ_MODEL", "openai/gpt-oss-120b"))
+    llm_model: str = field(default_factory=lambda: os.getenv("LLM_MODEL", "claude-opus-5-5"))
+    llm_effort: str = field(default_factory=lambda: os.getenv("LLM_EFFORT", "medium"))
 
 
 @lru_cache

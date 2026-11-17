@@ -4,6 +4,9 @@ python-docx==1.2.0
 markdown==3.8.2
 # Embeddings (Phase 2) — local ONNX model, no API key
 fastembed==0.9.1
+# LLM (Phase 3) — provider chosen by LLM_PROVIDER in .env
+langchain-groq==1.2.0
+anthropic==2.10.0
 # Database
 psycopg[binary]==3.3.9
 pgvector==0.5.1

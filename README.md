@@ -9,7 +9,8 @@ A grounded, secure and auditable AI assistant for hospital patient services (HCL
 | 0 | Requirements & design: `docs/01_requirements_and_design.md` | ✅ |
 | 1 | Database (Postgres + pgvector) and sample documents | ✅ |
 | 2 | Document ingestion pipeline: `app/ingestion/` (26 tests passing) | ✅ |
-| 3–9 | RAG, tools, orchestrator, app, security, evaluation, deployment | – |
+| 3 | RAG: hybrid retrieval, reranking, cited answers, conflict rules (`app/rag/`) | ✅ |
+| 4–9 | Tools, orchestrator, app, security, evaluation, deployment | – |
 
 ## Quick start
 ```powershell
@@ -21,6 +22,8 @@ py -3.12 -m venv .venv
 Get-Content db\verify.sql -Raw | docker exec -i hospital_db psql -U hospital_app -d hospital
 .venv\Scripts\python scripts\ingest_kb.py           # extract → chunk → embed → index all documents
 .venv\Scripts\python scripts\search_demo.py "What are ICU visiting hours?"
+.venv\Scripts\python scripts\eval_retrieval.py      # retrieval + not_found gate evaluation (no LLM cost)
+.venv\Scripts\python scripts\ask.py "What are the ICU visiting hours?"   # needs ANTHROPIC_API_KEY in .env
 .venv\Scripts\python -m pytest                      # tests (DB must be running)
 ```
 How it was built, with design decisions and the bugs we fixed: see `docs/BUILD_LOG.md`.
