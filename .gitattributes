@@ -1,0 +1,4 @@
+# Store text files with Linux line endings (Docker containers run Linux)
+* text=auto eol=lf
+*.pdf binary
+*.docx binary
