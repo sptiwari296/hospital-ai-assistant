@@ -117,3 +117,43 @@ Query pipeline (`app/rag/service.py`):
 6. **The overridden source wasn't cited.** The ICU visitor answer cited only the advisory. Resolved conflicts now cite both the winning and the overridden document; the conflict record says which one applies.
 
 **Still open for Phase 8:** a full answer-quality evaluation with the real LLM (accuracy, citation accuracy and latency p50/p95 over the whole eval set).
+
+## Phase 4: Deterministic healthcare tools (operational pathway)
+**Output:** `app/tools/*`, `app/clock.py`, `db/init/04_tools.sql`, `scripts/tools_demo.py`, `tests/test_tools.py`
+
+**Design rules applied to every tool**
+1. **Identity from the session, never from inputs.** `RequestContext` is built by the backend from the login. Patients see only their own records, and staff only patients in `care_assignments`. No tool input model has a `patient_id` field: a test enforces this, and `extra="forbid"` rejects injected fields.
+2. **No information leaks.** Another patient's appointment or invoice returns the same "not found in your records" message as one that doesn't exist.
+3. **One result shape.** `ToolResult` carries status, `answer_type`, a deterministic summary, data, the source system, references (rule ids, document sections, record ids) and disclaimers. Expected errors become `refused` or `clarification_needed` results instead of exceptions.
+4. **Two-step writes.** `reschedule_appointment` / `cancel_appointment` only **propose**: they write a `pending_actions` row and return a `confirmation_id` (expires in 10 min). `confirm_action` re-validates everything under row locks (`SELECT … FOR UPDATE`), changes appointment and slots in one transaction, **re-reads the record to verify**, and only then returns `action_completed`. `confirm_action` is **not** in the LLM's tool registry: only the user's own "yes" can trigger it. `pending_actions` doubles as a permanent log of every requested change.
+5. **Deterministic clock.** `app/clock.py` gives hospital-local time. Tests freeze it at 18 Nov 2026 09:00, so they don't break as real time moves.
+6. **Masking.** Policy numbers are shown as `NWG-****-**4455`.
+
+| Tool | Functions | Key rules |
+|---|---|---|
+| 1 Appointments | `get_appointments`, `get_available_slots`, `reschedule_appointment`, `cancel_appointment` (+ backend-only `confirm_action` / `decline_action`) | Same department and slot type; replacement slots start tomorrow; no changes within 24 h; surgery only via the surgical team; slot double-booking blocked by the DB unique index |
+| 2 Insurance | `check_insurance_eligibility(procedure, service_date)` | In order: active policy on the date → hospital in network → rule **in force on the service date** → exclusions → waiting period → required diagnosis → coverage % capped at the limit → pre-authorisation status. Returns one of 6 statuses with amounts and rule references |
+| 3 Labs / RIS | `get_lab_results`, `get_latest_lab_result`, `get_radiology_reports` | Patient wording → test code ("blood sugar" → fasting glucose). Value, unit, reference range, **the lab's own flag**, dates and LIS reference only. A "not a diagnosis" note is always attached |
+| 4 Medications | `drug_interaction_check`, `get_active_medications`, `check_new_medication` | Only the formulary table decides. Unknown names are reported as unrecognised, never guessed. "No listed interaction" is not reported as "safe" |
+| 5 Billing | `get_bills`, `get_payment_status`, `calculate_estimated_bill` | Decimal arithmetic. The estimate reuses the insurance engine, so billing and eligibility always agree |
+| 6 Care coordination | `get_pending_orders`, `get_preoperative_test_status`, `get_surgeon_availability`, `get_readiness_checklist` | Test validity is judged against the **scheduled surgery date** (DOC003 windows); HbA1c < 8.0% rule. Every result carries "administrative check, not medical clearance" |
+
+**Persona results** (`scripts/tools_demo.py`, all deterministic)
+
+| Patient | Result |
+|---|---|
+| Rahul, knee replacement on 26 Nov | Requires pre-authorisation (pending since 12 Nov). Insurer ₹2,40,000 / patient ₹60,000. For a Feb 2027 date the **2027 agreement** applies automatically (90%, ₹2,70,000) |
+| Rahul, pre-op status | 3 of 6 done (CBC, ECG, HbA1c 7.2% < 8.0). Outstanding: chest X-ray, PT/INR, anaesthesia review (booked 23 Nov) |
+| Rahul, "can I take clarithromycin?" | MAJOR interaction with his atorvastatin (formulary) |
+| Priya | Knee replacement not covered (plan exclusion); MRI 50% (₹6,000) |
+| Arjun | Not eligible (policy expired 30 Sep 2026); warfarin + aspirin MAJOR; invoice B8003 ₹15,000 overdue |
+| Sneha | Not eligible: 2-year waiting period ends 31 Jul 2028 |
+| Cardiology nurse opening Rahul | Refused (not assigned) |
+
+**Tests:** 82 in total, 34 new. They cover registry safety, authorisation, the full propose → confirm → verify flow, a confirmation from another user, an expired confirmation, a slot taken between proposal and confirmation (nothing changes), the 24-hour rule, all insurance statuses with exact amounts, the network restriction, masking, lab mapping and history, formulary-only interactions, overdue bills, estimates, the pre-op status against the surgery date, an HbA1c rule breach, and the administrative-only wording. Tests that write restore the seed data.
+
+**Problems found and fixed**
+1. **Same-day slots were offered** as alternatives (a few hours away). Replacement slots now start tomorrow, and the check is enforced again at confirmation.
+2. **Staff saw "Your appointments"** for a patient's record. The wording now depends on the role.
+3. **Reference ranges printed as "70.00–99.00"** (database NUMERIC). They're now formatted as "70–99".
+4. **Windows had no timezone database** for `zoneinfo`. Added `tzdata`.

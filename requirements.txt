@@ -13,5 +13,6 @@ pgvector==0.5.1
 # Validation / config
 pydantic==2.14.3
 python-dotenv==1.2.4
+tzdata  # timezone database for zoneinfo on Windows (hospital clock)
 # Testing
 pytest==9.2.0
