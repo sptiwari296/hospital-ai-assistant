@@ -1,6 +1,6 @@
 # Phase 0 — Requirements & System Design
 **Project:** AI-Powered Hospital Patient Services Assistant
-**Source brief:** `Hospital_AI_Assistant_Use_Case.pdf` (HCLTech Future Ready AI Engineer Hackathon, v1.0)
+**Scope:** a hospital patient-services assistant that must be grounded, secure and auditable (requirements R1–R11 below)
 **Target maturity:** Level 4–5 (tool-based assistant with multi-step workflows). Per the brief's design principle we use *the simplest architecture* that satisfies grounding, privacy, deterministic decisioning, action control and auditability. Specialised agents (Level 6) are optional.
 
 ---

@@ -2,7 +2,7 @@
 
 A **grounded, secure and auditable** AI assistant for hospital patient services: hospital policies with citations, a patient's own appointments, labs, insurance, medicines and bills, appointment changes with confirmation, and the multi-step *"Can I proceed with surgery next week?"* workflow.
 
-Built for the HCLTech *Future Ready AI Engineer* use case. **All data is synthetic.**
+A personal project by **Sp Tiwari**, designed and built end to end: requirements, data, RAG, tools, orchestration, security, evaluation and deployment. **All data is synthetic.**
 
 ## What makes it different from a chatbot
 - **Two pathways.** Policy questions are answered by **RAG over approved, currently effective documents** with citations (document, section, version, effective date). Questions about the patient are answered by **deterministic tools** over the hospital database. The LLM never invents eligibility, lab values or action results.
