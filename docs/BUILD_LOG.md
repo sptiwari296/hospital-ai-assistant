@@ -330,3 +330,25 @@ The live run was not repeated after the fixes (Groq's free tier allows 8,000 tok
 8. **Scoring bug in my evaluator:** rate-limit outages ("temporarily unavailable") on medical-advice cases were counted as safety violations. Corrected: *safety* means the system answered or acted where it must not; a refusal, `not_found` or outage is fail-closed and is scored as an accuracy failure or error instead.
 
 **Dataset adjustments (documented, not hidden):** where two outcomes are both correct, the case accepts both. An unsupported question may be classified `knowledge_query` (search finds nothing) or `out_of_scope`; "how much will insurance pay" may use the eligibility or the estimate tool; a checklist question may run the full readiness plan. All other checks stay strict.
+
+## Phase 9: Deployment, monitoring and repository layout
+**Output:** `docker/` (api + frontend Dockerfiles, Caddyfile, prometheus.yml), `docker-compose.yml` (full stack), `docker-compose.dev.yml` (database only), `backend/app/api/monitoring.py`, `.github/workflows/ci.yml`, `scripts/smoke_test.py`, **`docs/DEPLOYMENT.md`**
+
+**Deployment**
+- **Images:** API (Python 3.12-slim, uid 10001, embedding + reranker models baked in at build time, so no runtime downloads) and frontend (Next.js `standalone`, uid 10001). Secrets come only from `.env` via `env_file`; `.dockerignore` keeps them out of images.
+- **Stack:** `db` (not published, on an `internal` network with no internet) → one-shot `init` (API role password, ID encryption, demo users, ingestion) → `api` (starts only after `init` succeeds; health check = readiness) → `web` → `proxy` (Caddy, **HTTPS on 443**, HTTP → HTTPS, HSTS, one origin for UI and API, so cookies are `Secure`). Optional `prometheus` profile.
+- **Deployed from scratch:** a new database volume, all 6 migrations, init and the API healthy in about 30 s.
+
+**Monitoring:** `/api/health` (liveness), `/api/ready` (DB, searchable chunks, models, LLM key), Prometheus metrics (requests by route template and status, latency histogram, answers by type and intent, LLM outages, logins by outcome, ingestion jobs), one JSON log line per request with trace id and **route template only** (no query strings, no patient data). Models are warmed at startup.
+
+**Verified:** smoke test over HTTPS **11/11** (readiness, redirect, metrics and docs not public, HSTS, UI, Secure+HttpOnly cookie, patient data, live LLM chat, trace id, other-patient refusal); DB publishes no port and has no internet; API runs as `appuser`; Prometheus target `up` with chat-answer counters.
+
+**CI** (`.github/workflows/ci.yml`): backend job (pgvector service, schema from `backend/database/init`, throw-away generated secrets, setup + ingestion, full pytest incl. the release gate, report uploaded as an artifact), frontend job (tsc, eslint, build), image builds.
+
+**Repository layout:** reorganised into `frontend/src/{app,components,services,hooks}`, `backend/{app,database,requirements.txt}`, `data/{hospital_documents,synthetic_patients,evaluation_dataset}`, `tests/{unit,rag,integration,security,evaluation}`, `docker/`, using `git mv` so history is kept. Internal module names were kept (a deliberate choice: the code was fully tested under them). `pages/` is not used because Next.js reserves it for the older Pages Router; the screens live in `src/app/`. Earlier sections of this log keep the paths as they were when each phase was built.
+
+**Problems found and fixed**
+1. **`/api/metrics` was publicly reachable through the proxy.** Caddy runs top-level `handle` blocks before a top-level `respond`, so `/api/*` took the request first. Moved the block inside the `/api/*` handler. The smoke test caught it.
+2. **Prometheus' port couldn't be published:** Docker doesn't publish ports for a container that is only on an `internal` network. Moved Prometheus to the frontend network; the database network stays internet-free.
+3. **Lowercase `groq_api_key` in `.env`:** works on Windows (case-insensitive), invisible on Linux. Config now accepts both names.
+4. **Restructure:** the bulk path rewrite missed paths built with `/` joins (`ROOT / "data" / "knowledge_base"`), and 5 document-reading tests caught it before anything was pushed. Stale `.next/` type files from the old location also had to be cleared.

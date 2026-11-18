@@ -10,7 +10,7 @@ from pathlib import Path
 
 import httpx
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "backend"))
 from app.config import get_settings  # noqa: E402
 
 BASE = sys.argv[1] if len(sys.argv) > 1 else "https://localhost"

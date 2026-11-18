@@ -1,26 +1,93 @@
-# One service for now: PostgreSQL 17 with the pgvector extension.
-# Files in db/init/ run automatically (in name order) the FIRST time the database volume is created.
+# Production-style stack: everything in containers, HTTPS via Caddy, database not exposed.
+#   docker compose up -d --build
+#   docker compose --profile monitoring up -d   # + Prometheus on 127.0.0.1:9090
+# Secrets come from .env (never baked into images). See docs/DEPLOYMENT.md.
+name: hospital-prod
+
 services:
   db:
     image: pgvector/pgvector:pg17
-    container_name: hospital_db
-    # Dates like "effective today" must use the HOSPITAL's local date, not UTC
     command: ["postgres", "-c", "timezone=${HOSPITAL_TIMEZONE:-Asia/Kolkata}"]
     environment:
-      TZ: ${HOSPITAL_TIMEZONE:-Asia/Kolkata}
       POSTGRES_DB: ${POSTGRES_DB}
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-    ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+      TZ: ${HOSPITAL_TIMEZONE:-Asia/Kolkata}
     volumes:
-      - hospital_pgdata:/var/lib/postgresql/data   # data survives container restarts
-      - ./db/init:/docker-entrypoint-initdb.d:ro    # schema + seed scripts
+      - pgdata:/var/lib/postgresql/data
+      - ./backend/database/init:/docker-entrypoint-initdb.d:ro       # schema, seed, chunks, tools, API, security (RLS)
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
       interval: 5s
       timeout: 3s
-      retries: 20
+      retries: 30
+    restart: unless-stopped
+    networks: [backend]                                # no published port: only the API can reach it
+
+  init:                                                # one-shot: prepares a fresh database, then exits
+    image: hospital-api:latest
+    build: {context: ., dockerfile: docker/api.Dockerfile}
+    command: ["sh", "-c", "python scripts/setup_security.py && python scripts/set_demo_passwords.py && python scripts/ingest_kb.py"]
+    env_file: .env
+    environment: {POSTGRES_HOST: db, POSTGRES_PORT: "5432"}
+    volumes:
+      - kbfiles:/srv/data/hospital_documents/files
+    depends_on:
+      db: {condition: service_healthy}
+    restart: "no"
+    networks: [backend]
+
+  api:
+    image: hospital-api:latest
+    env_file: .env
+    environment:
+      POSTGRES_HOST: db
+      POSTGRES_PORT: "5432"
+      COOKIE_SECURE: "true"                            # HTTPS only: Secure cookie + HSTS
+      FRONTEND_ORIGIN: https://localhost
+    volumes:
+      - kbfiles:/srv/data/hospital_documents/files         # live-uploaded documents survive restarts (R11)
+      - uploads:/srv/data/uploads
+    depends_on:
+      init: {condition: service_completed_successfully}
+    restart: unless-stopped
+    mem_limit: 1500m
+    networks: [backend, frontend]                      # frontend network gives internet egress for the LLM API
+
+  web:
+    image: hospital-web:latest
+    build: {context: ./frontend, dockerfile: ../docker/frontend.Dockerfile}
+    restart: unless-stopped
+    mem_limit: 300m
+    networks: [frontend]
+
+  proxy:
+    image: caddy:2.8.4-alpine
+    ports: ["80:80", "443:443"]
+    volumes:
+      - ./docker/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+    depends_on:
+      api: {condition: service_healthy}
+      web: {condition: service_started}
+    restart: unless-stopped
+    networks: [frontend]
+
+  prometheus:
+    image: prom/prometheus:v2.53.0
+    profiles: ["monitoring"]
+    volumes:
+      - ./docker/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports: ["127.0.0.1:9090:9090"]                     # local only
+    networks: [frontend]                               # reaches api:8000; ports can't be published from an internal network
 
 volumes:
-  hospital_pgdata:
+  pgdata:
+  kbfiles:
+  uploads:
+  caddy_data:
+
+networks:
+  backend:
+    internal: true                                     # database network: no internet
+  frontend:

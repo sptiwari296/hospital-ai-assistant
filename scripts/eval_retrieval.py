@@ -1,6 +1,6 @@
 """Retrieval evaluation (free: no LLM calls).
 
-Measures, on eval/rag_eval.json:
+Measures, on data/evaluation_dataset/rag_eval.json:
   * retrieval hit rate — the expected document appears in the selected evidence
   * gate accuracy      — answerable questions pass the not_found gate, unanswerable ones don't
   * forbidden hits     — superseded / future documents must never appear
@@ -11,7 +11,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(ROOT / "backend"))
 
 from app.config import get_settings  # noqa: E402
 from app.rag.query import preprocess  # noqa: E402
@@ -22,7 +22,7 @@ from app.rag.selection import select_evidence  # noqa: E402
 
 def main() -> None:
     settings = get_settings()
-    cases = json.loads((ROOT / "eval" / "rag_eval.json").read_text(encoding="utf-8"))
+    cases = json.loads((ROOT / "data" / "evaluation_dataset" / "rag_eval.json").read_text(encoding="utf-8"))
     hits = gate_ok = answerable = forbidden = 0
     print(f"{'id':<4} {'gate':<6} {'hit':<4} top evidence (rerank / similarity)")
     for case in cases:

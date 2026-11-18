@@ -8,7 +8,7 @@ import sys
 from datetime import date, datetime
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "backend"))
 
 from app import clock  # noqa: E402
 from app.tools import appointments  # noqa: E402

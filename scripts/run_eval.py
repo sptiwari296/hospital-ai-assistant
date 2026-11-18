@@ -3,13 +3,13 @@
   .venv\\Scripts\\python scripts\\run_eval.py                    # oracle mode, all 160 cases (no LLM cost)
   .venv\\Scripts\\python scripts\\run_eval.py --mode live --pause 8   # real LLM end to end (rate-limit friendly)
   .venv\\Scripts\\python scripts\\run_eval.py --only policy ADV-01   # a group and/or case ids
-Writes eval/reports/latest-<mode>.md and .json. Exit code 1 if the release gate is blocked.
+Writes data/evaluation_dataset/reports/latest-<mode>.md and .json. Exit code 1 if the release gate is blocked.
 """
 import argparse
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "backend"))
 
 from app.evaluation.runner import run, write_report  # noqa: E402
 

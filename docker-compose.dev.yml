@@ -1,0 +1,28 @@
+# Local DEVELOPMENT: only the database (run the API and UI on the host).
+#   docker compose -f docker-compose.dev.yml up -d
+# The full containerised stack is docker-compose.yml.
+# Files in backend/database/init/ run automatically (in name order) the FIRST time the database volume is created.
+services:
+  db:
+    image: pgvector/pgvector:pg17
+    container_name: hospital_db
+    # Dates like "effective today" must use the HOSPITAL's local date, not UTC
+    command: ["postgres", "-c", "timezone=${HOSPITAL_TIMEZONE:-Asia/Kolkata}"]
+    environment:
+      TZ: ${HOSPITAL_TIMEZONE:-Asia/Kolkata}
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - hospital_pgdata:/var/lib/postgresql/data   # data survives container restarts
+      - ./backend/database/init:/docker-entrypoint-initdb.d:ro    # schema + seed scripts
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+volumes:
+  hospital_pgdata:

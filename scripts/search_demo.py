@@ -5,7 +5,7 @@ Run:  .venv\\Scripts\\python scripts\\search_demo.py "What are ICU visiting hour
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "backend"))
 
 from app.db import connect  # noqa: E402
 from app.ingestion.embeddings import get_embedder  # noqa: E402

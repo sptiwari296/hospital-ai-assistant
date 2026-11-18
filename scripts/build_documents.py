@@ -1,8 +1,8 @@
 """Build the sample hospital knowledge base.
 
-Reads the Markdown sources in data/knowledge_base/source/ and writes real
-PDF / DOCX files to data/knowledge_base/files/, using the file names listed in
-data/knowledge_base/metadata.json. Phase 2 (ingestion) reads those files.
+Reads the Markdown sources in data/hospital_documents/source/ and writes real
+PDF / DOCX files to data/hospital_documents/files/, using the file names listed in
+data/hospital_documents/metadata.json. Phase 2 (ingestion) reads those files.
 
 Run:  .venv\\Scripts\\python scripts\\build_documents.py
 """
@@ -15,7 +15,7 @@ import markdown
 from docx import Document
 
 ROOT = Path(__file__).resolve().parent.parent
-KB = ROOT / "data" / "knowledge_base"
+KB = ROOT / "data" / "hospital_documents"
 SOURCE_DIR = KB / "source"
 OUTPUT_DIR = KB / "files"
 

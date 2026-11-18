@@ -1,4 +1,4 @@
-"""Ingest every document listed in data/knowledge_base/metadata.json.
+"""Ingest every document listed in data/hospital_documents/metadata.json.
 
 Run:  .venv\\Scripts\\python scripts\\ingest_kb.py
 Safe to run again: unchanged files are detected by checksum and not re-embedded.
@@ -7,7 +7,7 @@ import json
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "backend"))
 
 from app.config import get_settings  # noqa: E402
 from app.db import connect  # noqa: E402

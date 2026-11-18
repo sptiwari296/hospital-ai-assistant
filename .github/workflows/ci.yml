@@ -30,8 +30,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
-        with: {python-version: "3.12", cache: pip}
-      - run: pip install -r requirements.txt
+        with: {python-version: "3.12", cache: pip, cache-dependency-path: backend/requirements.txt}
+      - run: pip install -r backend/requirements.txt
       - name: Generate throw-away CI secrets
         run: |
           python - >> "$GITHUB_ENV" <<'EOF'
@@ -46,7 +46,7 @@ jobs:
         run: |
           sudo apt-get install -y -q postgresql-client
           psql -h localhost -U hospital_app -d hospital -c "ALTER DATABASE hospital SET timezone TO 'Asia/Kolkata'"
-          for f in db/init/*.sql; do psql -h localhost -U hospital_app -d hospital -v ON_ERROR_STOP=1 -q -f "$f"; done
+          for f in backend/database/init/*.sql; do psql -h localhost -U hospital_app -d hospital -v ON_ERROR_STOP=1 -q -f "$f"; done
       - name: Security setup, demo users, knowledge-base ingestion
         run: |
           python scripts/setup_security.py
@@ -56,18 +56,18 @@ jobs:
         run: python -m pytest -q
       - uses: actions/upload-artifact@v4
         if: always()
-        with: {name: evaluation-report, path: eval/reports/latest-oracle.md}
+        with: {name: evaluation-report, path: data/evaluation_dataset/reports/latest-oracle.md}
 
   frontend:
     runs-on: ubuntu-latest
-    defaults: {run: {working-directory: web}}
+    defaults: {run: {working-directory: frontend}}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
-        with: {node-version: "22", cache: npm, cache-dependency-path: web/package-lock.json}
+        with: {node-version: "22", cache: npm, cache-dependency-path: frontend/package-lock.json}
       - run: npm ci
       - run: npx tsc --noEmit
-      - run: npx eslint app components lib
+      - run: npx eslint src
       - run: npm run build
 
   images:
@@ -75,5 +75,5 @@ jobs:
     needs: [backend, frontend]
     steps:
       - uses: actions/checkout@v4
-      - run: docker build -f Dockerfile.api -t hospital-api:ci .
-      - run: docker build -t hospital-web:ci web
+      - run: docker build -f docker/api.Dockerfile -t hospital-api:ci .
+      - run: docker build -f docker/frontend.Dockerfile -t hospital-web:ci frontend

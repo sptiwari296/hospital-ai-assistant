@@ -7,6 +7,7 @@
 **/__pycache__
 .pytest_cache
 data/uploads
-eval/reports
-web/node_modules
-web/.next
+data/evaluation_dataset
+frontend
+tests
+docs

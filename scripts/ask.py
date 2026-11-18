@@ -6,7 +6,7 @@ Needs ANTHROPIC_API_KEY in .env for the LLM step (not_found answers work without
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "backend"))
 
 from app.rag.generator import LLMError  # noqa: E402
 from app.rag.service import RagService  # noqa: E402
