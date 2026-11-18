@@ -1,0 +1,27 @@
+# Cloud reverse proxy: a public name -> automatic, browser-trusted Let's Encrypt certificate.
+# SITE_ADDRESS is a domain pointing at the server, e.g. hospital.example.com or <ip>.sslip.io
+# (sslip.io resolves "1.2.3.4.sslip.io" to 1.2.3.4, so no domain purchase is needed).
+{
+	admin off
+}
+
+{$SITE_ADDRESS} {
+	encode gzip
+
+	handle /api/* {
+		# Internal-only endpoint: Prometheus scrapes it on the private network
+		@internal path /api/metrics
+		respond @internal 404
+		reverse_proxy api:8000
+	}
+	handle {
+		reverse_proxy web:3000
+	}
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "no-referrer"
+		-Server
+	}
+}

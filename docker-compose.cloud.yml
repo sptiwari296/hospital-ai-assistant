@@ -1,0 +1,15 @@
+# Cloud override: use with the main file.
+#   docker compose -f docker-compose.yml -f docker-compose.cloud.yml up -d --build
+# Needs SITE_ADDRESS in .env (a domain or <public-ip>.sslip.io) and ports 80/443 open.
+services:
+  api:
+    environment:
+      FRONTEND_ORIGIN: https://${SITE_ADDRESS}
+    mem_limit: 3g
+
+  proxy:
+    environment:
+      SITE_ADDRESS: ${SITE_ADDRESS}
+    volumes:
+      - ./docker/Caddyfile.cloud:/etc/caddy/Caddyfile:ro   # replaces the localhost Caddyfile
+      - caddy_data:/data                                  # keeps the Let's Encrypt certificate
