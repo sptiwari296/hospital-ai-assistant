@@ -67,16 +67,50 @@ def pick_offered_option(message: str, session: Session) -> int | None:
     return slots[index]["slot_id"] if 0 <= index < len(slots) else None
 
 
-def _matches(appt: dict, hint: str) -> bool:
-    words = [w for w in re.findall(r"[a-z0-9]+", hint.lower()) if len(w) > 2 and w not in
-             {"the", "appointment", "appointments", "my", "with", "reschedule", "cancel", "move", "change"}]
-    haystack = " ".join(str(appt[k]) for k in ("department", "doctor", "type", "reason", "display_time")).lower()
-    return bool(words) and all(w in haystack for w in words)
+STOP = {"the", "appointment", "appointments", "my", "with", "reschedule", "cancel", "move", "change", "please"}
+
+
+def _norm(text: str) -> str:
+    """British/American spelling: orthopaedic -> orthopedic, anaesthesia -> anesthesia."""
+    return text.lower().replace("ae", "e")
+
+
+def _hint_words(hint: str) -> list[str]:
+    return [w for w in re.findall(r"[a-z0-9]+", _norm(hint)) if len(w) > 2 and w not in STOP]
+
+
+def _hits(appt: dict, words: list[str], fields: tuple[str, ...]) -> int:
+    haystack = _norm(" ".join(str(appt[k]) for k in fields))
+    return sum(w in haystack for w in words)
+
+
+STRONG = ("department", "doctor", "type")
+ALL_FIELDS = (*STRONG, "reason", "display_time")
+
+
+def _find_target(appointments: list[dict], hint: str) -> list[dict]:
+    """Every hint word must match somewhere; ties are broken by matches in STRUCTURED fields
+    (department, doctor, type). Otherwise 'knee surgery' also matches a cardiology visit whose
+    free-text reason says 'before knee surgery'."""
+    words = _hint_words(hint)
+    if not words:
+        return []
+    full = [a for a in appointments if _hits(a, words, ALL_FIELDS) == len(words)]
+    if len(full) <= 1:
+        return full or [a for a in appointments if _hits(a, words, STRONG) == len(words)]
+    best = max(_hits(a, words, STRONG) for a in full)
+    return [a for a in full if _hits(a, words, STRONG) == best]
 
 
 def appointment_change(ex: Executor, message: str, tool_calls: list[tuple[str, dict]], hint: str) -> Part:
     session = ex.session
     proposals = [(t, a) for t, a in tool_calls if t in ("reschedule_appointment", "cancel_appointment")]
+    # A cancel proposal must name one of the patient's REAL upcoming appointments; LLMs sometimes
+    # invent ids ("orthopaedic_2026-11-19"). Unknown ids fall back to matching the user's words.
+    if any(t == "cancel_appointment" for t, _ in proposals):
+        upcoming_ids = {a["appointment_id"] for a in ex.run("get_appointments", {}).data.get("appointments", [])}
+        proposals = [(t, a) for t, a in proposals
+                     if t != "cancel_appointment" or a.get("appointment_id") in upcoming_ids]
 
     # A concrete proposal: the slot MUST be one we offered for that appointment.
     for tool, args in proposals:
@@ -94,7 +128,7 @@ def appointment_change(ex: Executor, message: str, tool_calls: list[tuple[str, d
     upcoming = ex.run("get_appointments", {})
     if upcoming.status != "success":
         return part_from(upcoming)
-    candidates = [a for a in upcoming.data["appointments"] if _matches(a, hint or message)]
+    candidates = _find_target(upcoming.data["appointments"], hint or message)
     if len(candidates) != 1:
         listing = "\n".join(f"- {a['display_time']} – {a['doctor']} ({a['department']})"
                             for a in upcoming.data["appointments"])

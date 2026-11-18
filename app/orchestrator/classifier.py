@@ -77,10 +77,18 @@ Tools (the patient is always taken from the login; never put a patient id in arg
 {_tool_catalogue()}
 
 Rules:
+- Documents vs records: questions about how the hospital works — rules, procedures, preparation, aftercare,
+  warning signs, emergency codes, evacuation, or the terms of a NAMED insurance plan — are knowledge_query,
+  even when a patient asks. Use the user's own records (tools) only when they ask about THEIR data:
+  "my appointment", "am I covered", "my results", "what do I owe".
+- medical_advice is ONLY a request to diagnose the user, interpret what their own results mean for their
+  health, or decide/change their treatment or doses. Asking what hospital guidance says is knowledge_query.
 - requires_rag is true when the answer needs hospital documents (policies, procedures, protocols, plan terms).
   Then put a clear standalone question in rag_query (resolve follow-ups using the conversation).
 - requires_tools is true when the answer needs the user's own records. List the read tools to call in tool_calls,
   with arguments as a JSON object string, e.g. {{"test_name": "HbA1c", "limit": 1}}. Use "{{}}" for no arguments.
+- Leave out optional arguments you don't know — never send empty strings.
+- Checking one new medicine against the user's current medicines uses check_new_medication.
 - Dates must be ISO format YYYY-MM-DD. Resolve relative dates ("next Monday") using today's date given below.
 - appointment_change: put the appointment the user means in target_hint (department, doctor or date words).
   If the conversation shows OFFERED SLOTS and the user picks one, call reschedule_appointment with that

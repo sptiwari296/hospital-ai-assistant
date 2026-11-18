@@ -66,7 +66,15 @@ def validate_route(cls: IntentClassification, ctx: RequestContext, message: str)
         elif len(plan.tool_calls) >= MAX_TOOL_CALLS:
             plan.notes.append(f"dropped '{call.tool}': more than {MAX_TOOL_CALLS} tool calls")
         else:
-            plan.tool_calls.append((call.tool, parse_arguments(call)))
+            args = {k: v for k, v in parse_arguments(call).items() if v not in ("", None, [])}
+            if len(args) != len(parse_arguments(call)):
+                plan.notes.append(f"{call.tool}: dropped empty arguments (defaults apply)")
+            if call.tool == "drug_interaction_check" and len(args.get("medication_list", [])) == 1 \
+                    and ctx.patient_id and "check_new_medication" in allowed:
+                plan.notes.append("one medicine given: checked against the patient's prescriptions instead")
+                plan.tool_calls.append(("check_new_medication", args))
+                continue
+            plan.tool_calls.append((call.tool, args))
 
     if not plan.tool_calls and cls.intent in DEFAULT_TOOL:
         plan.tool_calls.append((DEFAULT_TOOL[cls.intent], {}))

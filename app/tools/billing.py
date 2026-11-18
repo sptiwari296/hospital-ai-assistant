@@ -72,7 +72,8 @@ def calculate_estimated_bill(ctx: RequestContext, procedure: str, service_date: 
     charge = elig["hospital_charge"]
     if status in ("eligible", "requires_pre_authorization"):
         insurer, patient = elig["insurer_pays"], elig["patient_pays"]
-        summary = f"Estimated cost of {proc['name']}: {inr(charge)}. Insurance pays {inr(insurer)}, you pay {inr(patient)}."
+        summary = (f"Estimated cost of {proc['name']}: {inr(charge)}. Insurance pays {inr(insurer)} "
+                   f"({elig['coverage_percent']}% coverage), you pay {inr(patient)}.")
         if status == "requires_pre_authorization":
             summary += f" This assumes pre-authorisation is approved; without it you would pay the full {inr(charge)}."
     else:

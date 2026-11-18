@@ -115,7 +115,7 @@ TOOLS: dict[str, ToolSpec] = {t.name: t for t in [
     ToolSpec("get_preoperative_test_status", care.get_preoperative_test_status, ProcedureIn, "read",
              "Which required pre-operative tests are done, valid for the surgery date, or still outstanding."),
     ToolSpec("get_surgeon_availability", care.get_surgeon_availability, ProcedureIn, "read",
-             "The patient's scheduled surgery and the surgeon's next free theatre slots."),
+             "When the patient's surgery is scheduled and who the surgeon is, plus the surgeon's next free theatre slots."),
     ToolSpec("get_readiness_checklist", care.get_readiness_checklist, ProcedureIn, "read",
              "Administrative pre-surgery checklist (consent, fasting instructions, escort...)."),
 ]}

@@ -101,7 +101,12 @@ class Orchestrator:
 
         parts = [part_from(ex.run(tool, args)) for tool, args in plan.tool_calls]
         if plan.run_rag:
-            parts.append(self._rag(ex, session, plan.rag_query))
+            rag_part = self._rag(ex, session, plan.rag_query)
+            # The classifier rewrites the question for search; if that rewrite finds nothing, try the
+            # user's own words (the gate blocks before any LLM call, so this costs no extra tokens).
+            if rag_part.answer_type == "not_found" and plan.rag_query.strip() != message.strip():
+                rag_part = self._rag(ex, session, message)
+            parts.append(rag_part)
         return parts
 
     def _rag(self, ex: Executor, session: Session, query: str) -> Part:

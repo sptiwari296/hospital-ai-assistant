@@ -14,7 +14,8 @@ A grounded, secure and auditable AI assistant for hospital patient services (HCL
 | 5 | AI orchestrator: intent classification, validated routing, multi-step plans, confirmations (`app/orchestrator/`) | ✅ |
 | 6 | FastAPI backend with JWT login + Next.js frontend (chat, dashboard, admin uploads) | ✅ |
 | 7 | Security: Row-Level Security, least-privilege DB role, encryption at rest, redacted audit, cookie auth, CSRF, lockout, rate limits, injection quarantine (`docs/SECURITY.md`) | ✅ |
-| 8–9 | Evaluation, deployment | – |
+| 8 | Evaluation: 160-case dataset, oracle + live modes, 8 metrics, privacy/safety release gate (`eval/`, `app/evaluation/`) | ✅ |
+| 9 | Deployment | – |
 
 ## Run the full application
 ```powershell
@@ -41,7 +42,9 @@ Get-Content db\verify.sql -Raw | docker exec -i hospital_db psql -U hospital_app
 .venv\Scripts\python scripts\tools_demo.py          # every operational tool, per synthetic patient (no LLM)
 .venv\Scripts\python scripts\chat.py rahul.sharma --demo   # full assistant conversation (needs GROQ_API_KEY)
 .venv\Scripts\python scripts\chat.py rahul.sharma          # interactive chat
-.venv\Scripts\python -m pytest                      # tests (DB must be running)
+.venv\Scripts\python scripts\run_eval.py            # 160-case evaluation, oracle mode (no LLM cost) -> eval/reports/
+.venv\Scripts\python scripts\run_eval.py --mode live --pause 12   # end to end with the real LLM (~1 h on Groq free tier)
+.venv\Scripts\python -m pytest                      # tests incl. the release gate (DB must be running)
 ```
 How it was built, with design decisions and the bugs we fixed: see `docs/BUILD_LOG.md`.
 

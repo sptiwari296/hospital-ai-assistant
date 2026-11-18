@@ -5,6 +5,7 @@ separately (a "bi-encoder": fast, but approximate). A cross-encoder reads the
 question and the chunk TOGETHER and scores how well the chunk answers it:
 slower, but much more precise — so we only run it on the ~20–40 candidates.
 """
+import re
 from abc import ABC, abstractmethod
 from functools import lru_cache
 
@@ -34,8 +35,32 @@ def get_reranker() -> Reranker:
     return CrossEncoderReranker(s.rerank_model, str(s.model_cache_dir))
 
 
+MIN_SEGMENT_WORDS = 4
+
+
+def _segments(ev: Evidence) -> list[str]:
+    """Each line / sentence of a chunk, prefixed with its headings for context.
+    List-style chunks (several unrelated rules) dilute a whole-chunk score; one line may answer the question."""
+    out = []
+    for line in ev.content.split("\n")[1:]:              # first line is the section heading itself
+        for sentence in re.split(r"(?<=[.!?])\s+", line):
+            if len(sentence.split()) >= MIN_SEGMENT_WORDS:
+                out.append(f"{ev.heading_path}: {sentence.lstrip('• ')}")
+    return out
+
+
 def rerank(question: str, candidates: list[Evidence], reranker: Reranker | None = None) -> list[Evidence]:
+    """Max-sentence reranking: a chunk's score is the best of its whole-text score and its
+    individual sentence scores (one batch call to the cross-encoder)."""
     reranker = reranker or get_reranker()
-    for ev, score in zip(candidates, reranker.score(question, [c.content for c in candidates]), strict=True):
+    passages, owner = [], []
+    for i, c in enumerate(candidates):
+        for p in [c.content, *_segments(c)]:
+            passages.append(p)
+            owner.append(i)
+    best = [float("-inf")] * len(candidates)
+    for i, score in zip(owner, reranker.score(question, passages), strict=True):
+        best[i] = max(best[i], score)
+    for ev, score in zip(candidates, best, strict=True):
         ev.rerank_score = score
     return sorted(candidates, key=lambda e: e.rerank_score, reverse=True)
