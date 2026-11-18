@@ -1,0 +1,31 @@
+# Reverse proxy: HTTPS for everything, one origin for UI and API.
+# "tls internal" = Caddy's own local certificate authority (fine for localhost / demos).
+# For a real domain replace "localhost" with it and remove "tls internal": Caddy then gets a
+# Let's Encrypt certificate automatically.
+{
+	admin off
+}
+
+localhost {
+	tls internal
+	encode gzip
+
+	handle /api/* {
+		# Internal-only endpoint: Prometheus scrapes it on the private network.
+		# (Inside the handle block: Caddy runs top-level `handle` before a top-level `respond`.)
+		@internal path /api/metrics
+		respond @internal 404
+		reverse_proxy api:8000
+	}
+	# The API's /docs, /redoc and /openapi.json are not under /api/*, so they are never proxied.
+	handle {
+		reverse_proxy web:3000
+	}
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "no-referrer"
+		-Server
+	}
+}

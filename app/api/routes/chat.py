@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field, model_validator
 from app import audit
 from app.api.auth import (LOCK_MINUTES, CurrentUser, authenticate, clear_session_cookie, create_token,
                           current_user, set_session_cookie)
+from app.api.monitoring import CHAT_ANSWERS, LLM_UNAVAILABLE, LOGINS
 from app.api.ratelimit import enforce
 from app.api.sessions import load_session, save_session
 from app.db import connect
@@ -34,6 +35,7 @@ def login(body: LoginRequest, request: Request, response: Response):
     client_ip = request.client.host if request.client else None
     enforce("login", client_ip or "unknown", "LOGIN_RATE_LIMIT", 10)
     user, outcome = authenticate(body.username, body.password)
+    LOGINS.labels(outcome).inc()
     audit.record_security_event(trace_id=request.state.trace_id, action=f"login_{outcome}",
                                 username=body.username, user_id=user.user_id if user else None,
                                 role=user.role if user else None, outcome=outcome, client_ip=client_ip)
@@ -98,6 +100,9 @@ def chat(body: ChatRequest, request: Request, user: CurrentUser = Depends(curren
     response = orchestrator.handle(session, message, decision=body.decision, trace_id=request.state.trace_id)
     save_session(session_id, user, session)
     audit.record_chat(session.ctx, message, response)
+    CHAT_ANSWERS.labels(response.answer_type, response.intent or "none").inc()
+    if "temporarily unavailable" in response.answer or "could not look up" in response.answer:
+        LLM_UNAVAILABLE.inc()
     return ChatResponse(**response.model_dump(), session_id=session_id)
 
 

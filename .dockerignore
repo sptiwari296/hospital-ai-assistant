@@ -1,0 +1,12 @@
+.git
+.venv
+.cache
+.env
+.env.*
+!.env.example
+**/__pycache__
+.pytest_cache
+data/uploads
+eval/reports
+web/node_modules
+web/.next

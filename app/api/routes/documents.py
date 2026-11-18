@@ -8,6 +8,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPExcepti
 from pydantic import BaseModel, ValidationError
 
 from app.api.auth import CurrentUser, require_role
+from app.api.monitoring import INGESTION
 from app.config import ROOT, get_settings
 from app.db import connect
 from app.ingestion import store
@@ -39,6 +40,7 @@ def run_ingestion(job_id: str, path: Path, meta: DocumentMetadata, username: str
     with connect() as conn:
         conn.execute("""UPDATE ingestion_jobs SET status = %s, message = %s, trace_id = %s, chunk_count = %s,
                         finished_at = now() WHERE job_id = %s""", (status, message, trace, chunks, job_id))
+    INGESTION.labels(status).inc()
 
 
 @router.post("/upload", status_code=202)

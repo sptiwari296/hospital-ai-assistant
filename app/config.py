@@ -8,6 +8,9 @@ from dotenv import load_dotenv
 
 ROOT = Path(__file__).resolve().parent.parent
 load_dotenv(ROOT / ".env")
+# Windows env vars ignore case, Linux (Docker) doesn't: accept a lowercase key name too.
+if not os.getenv("GROQ_API_KEY") and os.getenv("groq_api_key"):
+    os.environ["GROQ_API_KEY"] = os.environ["groq_api_key"]
 os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")  # harmless model-cache warning on Windows
 
 
