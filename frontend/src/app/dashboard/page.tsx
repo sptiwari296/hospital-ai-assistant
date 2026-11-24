@@ -14,8 +14,8 @@ interface Labs { latest_by_test: { test_name: string; value: number; unit: strin
 
 function Card({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <section className="rounded-lg border border-border bg-surface p-4">
-      <h2 className="mb-3 font-semibold">{title}</h2>
+    <section className="panel">
+      <div className="panel-title">{title}</div>
       {children}
     </section>
   );
@@ -41,66 +41,83 @@ export default function Dashboard() {
       .catch((e) => setFailure(e.message));
   }, [me, patientId]);
 
-  if (error) return <p className="text-red-600">{error}</p>;
-  if (!me) return <p className="text-muted">Loading…</p>;
+  if (error) return <p style={{ color: "var(--bad)" }}>{error}</p>;
+  if (!me) return <p style={{ color: "var(--muted)" }}>Loading…</p>;
+
+  const row = (k: string, v: React.ReactNode) => (
+    <><dt style={{ color: "var(--dim)" }}>{k}</dt><dd>{v}</dd></>
+  );
 
   return (
-    <div className="space-y-4">
+    <div>
+      <div className="hero">
+        <div className="eyebrow">CityCare · my records</div>
+        <h1>Your care, <i>at a glance</i></h1>
+        <p>Profile, appointments, lab results and bills, read live from the hospital systems with your permissions.</p>
+      </div>
+
       {me.role === "staff" && (
-        <select className="rounded border border-border bg-surface px-2 py-1 text-sm" value={patientId ?? ""}
-          onChange={(e) => setPatientId(e.target.value || null)}>
-          <option value="">Select an assigned patient…</option>
-          {me.assigned_patients?.map((p) => <option key={p.patient_id} value={p.patient_id}>{p.patient_id} – {p.full_name}</option>)}
-        </select>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16, maxWidth: 420 }}>
+          <span className="side-label">Patient</span>
+          <select className="input" value={patientId ?? ""} onChange={(e) => setPatientId(e.target.value || null)}>
+            <option value="">Select an assigned patient…</option>
+            {me.assigned_patients?.map((p) => <option key={p.patient_id} value={p.patient_id}>{p.patient_id} · {p.full_name}</option>)}
+          </select>
+        </div>
       )}
-      {failure && <p className="text-red-600">{failure}</p>}
+      {failure && <p style={{ color: "var(--bad)" }}>{failure}</p>}
       {profile && (
-        <div className="grid gap-4 md:grid-cols-2">
+        <div style={{ display: "grid", gap: 16, gridTemplateColumns: "repeat(auto-fit, minmax(340px, 1fr))" }}>
           <Card title="Profile">
-            <dl className="grid grid-cols-[8rem_1fr] gap-y-1 text-sm">
-              <dt className="text-muted">Name</dt><dd>{profile.full_name} ({profile.patient_id})</dd>
-              <dt className="text-muted">Date of birth</dt><dd>{profile.dob}</dd>
-              <dt className="text-muted">Blood group</dt><dd>{profile.blood_group}</dd>
-              <dt className="text-muted">Allergies</dt><dd>{profile.allergies.join(", ") || "none recorded"}</dd>
-              <dt className="text-muted">Phone</dt><dd>{profile.phone}</dd>
-              <dt className="text-muted">ID number</dt><dd>{profile.national_id}</dd>
-              <dt className="text-muted">Insurance</dt>
-              <dd>{profile.insurance ? `${profile.insurance.provider} ${profile.insurance.plan_name} · ${profile.insurance.policy_number} · ${profile.insurance.status} until ${profile.insurance.valid_to}` : "none"}</dd>
+            <div className="pname" style={{ paddingRight: 0 }}>{profile.full_name}</div>
+            <div className="pmeta">{profile.patient_id} · born {profile.dob}</div>
+            <dl style={{ display: "grid", gridTemplateColumns: "8rem 1fr", rowGap: 6, fontSize: 13, marginTop: 12 }}>
+              {row("Blood group", profile.blood_group)}
+              {row("Allergies", profile.allergies.join(", ") || "none recorded")}
+              {row("Phone", profile.phone)}
+              {row("ID number", <span className="mono">{profile.national_id}</span>)}
+              {row("Insurance", profile.insurance ? (
+                <>
+                  {profile.insurance.provider} {profile.insurance.plan_name}{" "}
+                  <span className={`badge ${profile.insurance.status === "active" ? "ok" : "er"}`}>{profile.insurance.status}</span>
+                  <div className="pmeta">{profile.insurance.policy_number} · until {profile.insurance.valid_to}</div>
+                </>
+              ) : "none")}
             </dl>
           </Card>
+
           <Card title="Upcoming appointments">
-            {appts?.data.appointments?.length ? (
-              <ul className="space-y-2 text-sm">
-                {appts.data.appointments.map((a) => (
-                  <li key={a.appointment_id} className="border-b border-border pb-1 last:border-0">
-                    <span className="font-medium">{a.display_time}</span><br />
-                    <span className="text-muted">{a.doctor} · {a.department} · {a.type}</span>
-                  </li>
-                ))}
-              </ul>
-            ) : <p className="text-sm text-muted">{appts?.summary}</p>}
-            <p className="mt-3 text-xs text-muted">To reschedule, ask in the chat.</p>
+            {appts?.data.appointments?.length ? appts.data.appointments.map((a, n) => (
+              <div key={a.appointment_id} className="pcard" style={{ animationDelay: `${n * 70}ms`, marginBottom: 10 }}>
+                <div className="pname">{a.display_time}</div>
+                <div className="pmeta">{a.doctor} · {a.department}</div>
+                <span className="badge info">{a.type}</span>
+              </div>
+            )) : <p style={{ color: "var(--muted)", fontSize: 13 }}>{appts?.summary}</p>}
+            <div className="pmeta" style={{ marginTop: 6 }}>To reschedule, ask in the chat.</div>
           </Card>
+
           <Card title="Latest lab results">
-            <table className="w-full text-sm [&_td]:pr-3 [&_th]:pr-3">
-              <thead className="text-left text-muted"><tr><th>Test</th><th>Value</th><th>Range</th><th>Date</th></tr></thead>
+            <table className="table">
+              <thead><tr><th>Test</th><th>Value</th><th>Range</th><th>Date</th></tr></thead>
               <tbody>
                 {labs?.latest_by_test.map((r) => (
-                  <tr key={r.test_name} className="border-t border-border">
-                    <td className="py-1">{r.test_name}</td>
-                    <td className={r.flag === "normal" ? "" : "font-semibold text-orange-700 dark:text-orange-300"}>
+                  <tr key={r.test_name}>
+                    <td>{r.test_name}</td>
+                    <td style={r.flag === "normal" ? undefined : { color: "var(--warn)", fontWeight: 600 }}>
                       {r.value} {r.unit}{r.flag !== "normal" && ` (${r.flag})`}
                     </td>
-                    <td className="text-muted">{r.reference_range}</td>
-                    <td className="text-muted">{r.collected_at.slice(0, 10)}</td>
+                    <td style={{ color: "var(--muted)" }}>{r.reference_range}</td>
+                    <td className="mono" style={{ color: "var(--dim)", whiteSpace: "nowrap" }}>{r.collected_at.slice(0, 10)}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
-            <p className="mt-2 text-xs text-muted">{labs?.note}</p>
+            <div className="pmeta" style={{ marginTop: 8 }}>{labs?.note}</div>
           </Card>
+
           <Card title="Bills">
-            <p className="whitespace-pre-wrap text-sm">{bills?.summary ?? "No bills."}</p>
+            <p style={{ whiteSpace: "pre-wrap", fontSize: 13 }}>{bills?.summary ?? "No bills."}</p>
           </Card>
         </div>
       )}

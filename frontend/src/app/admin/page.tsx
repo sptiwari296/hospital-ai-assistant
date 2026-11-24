@@ -13,7 +13,9 @@ interface Job { job_id: string; document_id: string; file_name: string; status: 
 const TYPES = ["hospital_sop", "clinical_protocol", "nursing_procedure", "admission_policy", "discharge_guideline",
   "insurance_agreement", "emergency_procedure", "government_advisory"];
 const AUTHORITY = [[1, "1 – Government / regulator"], [2, "2 – Clinical guideline"], [3, "3 – Hospital policy"], [4, "4 – Department SOP"]];
-const field = "mt-1 w-full rounded border border-border bg-background px-2 py-1.5";
+
+const JOB_TONE: Record<string, string> = { ingested: "ok", rejected: "er", failed: "er", queued: "mu", running: "info" };
+const DOC_TONE: Record<string, string> = { approved: "ok", draft: "wa", retired: "mu" };
 
 export default function AdminPage() {
   const { me, error } = useMe(["doc_admin"]);
@@ -66,73 +68,79 @@ export default function AdminPage() {
     }
   }
 
-  if (error) return <p className="text-red-600">{error}</p>;
-  if (!me) return <p className="text-muted">Loading…</p>;
+  if (error) return <p style={{ color: "var(--bad)" }}>{error}</p>;
+  if (!me) return <p style={{ color: "var(--muted)" }}>Loading…</p>;
 
   return (
-    <div className="space-y-6">
-      <section className="rounded-lg border border-border bg-surface p-4">
-        <h2 className="mb-3 font-semibold">Upload a document</h2>
-        <form onSubmit={upload} className="grid gap-3 text-sm md:grid-cols-3">
-          <label className="md:col-span-3">File (PDF, DOCX or TXT, max 20 MB)
-            <input name="file" type="file" accept=".pdf,.docx,.txt" required className={field} /></label>
-          <label className="md:col-span-2">Title<input name="title" required className={field} /></label>
-          <label>Department<input name="department" required className={field} /></label>
-          <label>Type<select name="document_type" className={field}>{TYPES.map((t) => <option key={t}>{t}</option>)}</select></label>
-          <label>Policy lineage (same for every version)
-            <input name="lineage_id" required list="lineages" placeholder="e.g. ICU_VISITING" className={field} />
+    <div style={{ display: "grid", gap: 20 }}>
+      <div className="hero" style={{ marginBottom: 0 }}>
+        <div className="eyebrow">CityCare · knowledge base</div>
+        <h1>Documents the assistant <i>may</i> use</h1>
+        <p>Upload, approve and retire policies. Only approved documents that are in force and the newest of their lineage are searchable.</p>
+      </div>
+
+      <section className="panel">
+        <div className="panel-title">Upload a document</div>
+        <form onSubmit={upload} style={{ display: "grid", gap: 12, gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))" }}>
+          <label className="field" style={{ gridColumn: "1 / -1" }}>File (PDF, DOCX or TXT, max 20 MB)
+            <input name="file" type="file" accept=".pdf,.docx,.txt" required className="input" /></label>
+          <label className="field">Title<input name="title" required className="input" /></label>
+          <label className="field">Department<input name="department" required className="input" /></label>
+          <label className="field">Type<select name="document_type" className="input">{TYPES.map((t) => <option key={t}>{t}</option>)}</select></label>
+          <label className="field">Policy lineage
+            <input name="lineage_id" required list="lineages" placeholder="e.g. ICU_VISITING" className="input" />
             <datalist id="lineages">{[...new Set(docs.map((d) => d.lineage_id))].map((l) => <option key={l} value={l} />)}</datalist>
           </label>
-          <label>Version<input name="version" required placeholder="2.1" className={field} /></label>
-          <label>Effective date<input name="effective_date" type="date" required className={field} /></label>
-          <label>Expiry date (optional)<input name="expiry_date" type="date" className={field} /></label>
-          <label>Authority<select name="authority_level" defaultValue="3" className={field}>
+          <label className="field">Version<input name="version" required placeholder="2.1" className="input" /></label>
+          <label className="field">Effective date<input name="effective_date" type="date" required className="input" /></label>
+          <label className="field">Expiry date (optional)<input name="expiry_date" type="date" className="input" /></label>
+          <label className="field">Authority<select name="authority_level" defaultValue="3" className="input">
             {AUTHORITY.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select></label>
-          <label>Status<select name="approval_status" className={field}><option>approved</option><option>draft</option></select></label>
-          <label>Document ID (optional)<input name="document_id" placeholder="auto" className={field} /></label>
-          <div className="flex items-end">
-            <button disabled={busy} className="rounded bg-accent px-4 py-2 font-medium text-white disabled:opacity-50">
-              {busy ? "Uploading…" : "Upload & ingest"}</button>
+          <label className="field">Status<select name="approval_status" className="input"><option>approved</option><option>draft</option></select></label>
+          <label className="field">Document ID (optional)<input name="document_id" placeholder="auto" className="input" /></label>
+          <div style={{ display: "flex", alignItems: "flex-end" }}>
+            <button disabled={busy} className="btn btn-primary" style={{ width: "100%" }}>{busy ? "Uploading…" : "Upload & ingest"}</button>
           </div>
         </form>
-        {message && <p className="mt-3 text-sm">{message}</p>}
+        {message && <div className="notice" style={{ marginTop: 12 }}>{message}</div>}
       </section>
 
-      <section className="rounded-lg border border-border bg-surface p-4">
-        <h2 className="mb-3 font-semibold">Ingestion jobs</h2>
-        <table className="w-full text-sm [&_td]:pr-3 [&_th]:pr-3 [&_td]:align-top">
-          <thead className="text-left text-muted"><tr><th>Job</th><th>File</th><th>Document</th><th>Status</th><th>Chunks</th><th>Message</th></tr></thead>
+      <section className="panel" style={{ overflowX: "auto" }}>
+        <div className="panel-title">Ingestion jobs</div>
+        <table className="table">
+          <thead><tr><th>Job</th><th>File</th><th>Document</th><th>Status</th><th>Chunks</th><th>Message</th></tr></thead>
           <tbody>{jobs.map((j) => (
-            <tr key={j.job_id} className="border-t border-border">
-              <td className="py-1">{j.job_id}</td><td>{j.file_name}</td><td>{j.document_id}</td>
-              <td className={j.status === "ingested" ? "text-emerald-600" : j.status === "rejected" || j.status === "failed" ? "text-rose-600" : ""}>{j.status}</td>
-              <td>{j.chunk_count ?? "–"}</td><td className="text-muted">{j.message}</td>
+            <tr key={j.job_id}>
+              <td className="mono">{j.job_id}</td><td>{j.file_name}</td><td className="mono">{j.document_id}</td>
+              <td><span className={`badge ${JOB_TONE[j.status] ?? "mu"}`}>{j.status}</span></td>
+              <td>{j.chunk_count ?? "–"}</td><td style={{ color: "var(--muted)" }}>{j.message}</td>
             </tr>))}
-            {jobs.length === 0 && <tr><td colSpan={6} className="py-2 text-muted">No uploads yet.</td></tr>}
+            {jobs.length === 0 && <tr><td colSpan={6} style={{ color: "var(--muted)" }}>No uploads yet.</td></tr>}
           </tbody>
         </table>
       </section>
 
-      <section className="overflow-x-auto rounded-lg border border-border bg-surface p-4">
-        <h2 className="mb-3 font-semibold">Knowledge base</h2>
-        <table className="w-full text-sm [&_td]:pr-3 [&_th]:pr-3 [&_td]:align-top">
-          <thead className="text-left text-muted">
+      <section className="panel" style={{ overflowX: "auto" }}>
+        <div className="panel-title">Knowledge base</div>
+        <table className="table">
+          <thead>
             <tr><th>ID</th><th>Title</th><th>Lineage</th><th>Ver.</th><th>Effective</th><th>Status</th><th>Auth.</th><th>Chunks</th><th>Used today</th><th></th></tr>
           </thead>
           <tbody>{docs.map((d) => (
-            <tr key={d.document_id} className="border-t border-border">
-              <td className="py-1">{d.document_id}</td><td>{d.title}</td><td className="text-muted">{d.lineage_id}</td>
+            <tr key={d.document_id}>
+              <td className="mono">{d.document_id}</td><td>{d.title}</td><td className="mono" style={{ color: "var(--dim)" }}>{d.lineage_id}</td>
               <td>{d.version}</td><td>{d.effective_date}{d.expiry_date && ` → ${d.expiry_date}`}</td>
-              <td>{d.approval_status}</td><td>{d.authority_level}</td><td>{d.chunks}</td>
-              <td>{d.searchable ? "✅" : "—"}</td>
-              <td className="whitespace-nowrap">
-                {d.approval_status === "draft" && <button className="text-accent hover:underline" onClick={() => setStatus(d.document_id, "approved")}>Approve</button>}
-                {d.approval_status === "approved" && <button className="text-rose-600 hover:underline" onClick={() => setStatus(d.document_id, "retired")}>Retire</button>}
+              <td><span className={`badge ${DOC_TONE[d.approval_status] ?? "mu"}`}>{d.approval_status}</span></td>
+              <td>{d.authority_level}</td><td>{d.chunks}</td>
+              <td>{d.searchable ? <span className="badge ok">✓ live</span> : <span style={{ color: "var(--dim)" }}>—</span>}</td>
+              <td style={{ whiteSpace: "nowrap" }}>
+                {d.approval_status === "draft" && <button className="btn" onClick={() => setStatus(d.document_id, "approved")}>Approve</button>}
+                {d.approval_status === "approved" && <button className="btn" style={{ color: "var(--bad)" }} onClick={() => setStatus(d.document_id, "retired")}>Retire</button>}
               </td>
             </tr>))}
           </tbody>
         </table>
-        <p className="mt-2 text-xs text-muted">&quot;Used today&quot; = approved, in force and the newest version of its lineage.</p>
+        <div className="pmeta" style={{ marginTop: 8 }}>&quot;Used today&quot; = approved, in force and the newest version of its lineage.</div>
       </section>
     </div>
   );

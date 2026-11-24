@@ -352,3 +352,14 @@ The live run was not repeated after the fixes (Groq's free tier allows 8,000 tok
 2. **Prometheus' port couldn't be published:** Docker doesn't publish ports for a container that is only on an `internal` network. Moved Prometheus to the frontend network; the database network stays internet-free.
 3. **Lowercase `groq_api_key` in `.env`:** works on Windows (case-insensitive), invisible on Linux. Config now accepts both names.
 4. **Restructure:** the bulk path rewrite missed paths built with `/` joins (`ROOT / "data" / "knowledge_base"`), and 5 document-reading tests caught it before anything was pushed. Stale `.next/` type files from the old location also had to be cleared.
+
+## UI redesign: dark "CityCare" look
+**Output:** `frontend/src/app/globals.css` (design system), `components/Sidebar.tsx`, `components/ResultsPanel.tsx`, restyled `AnswerCard`, chat, records, documents and login pages; `NavBar.tsx` removed.
+
+- **Same visual language as my AI shopping assistant:** near-black background, amber accent, Inter / Instrument Serif / JetBrains Mono, colour tokens in CSS variables, and reduced-motion support.
+- **Layout:** a sticky sidebar (who is signed in, navigation, New conversation, API status, a 5-step "How it works") and a hero with a serif headline.
+- **Chat:** a fixed-height message box with avatars, an answer-type badge and the response time, "Try:" example chips and an input pinned at the bottom.
+- **Results · live panel:** each source of the latest answer is a card stamped **"✓ verified"**: the document, version, effective date, page and section. Records answers show **"✓ live record"** cards, and escalations show a warning card. A "How this answer was made" section lists the intent, the tools with their status and timing, the explanation, the model and the trace id.
+- **Records, documents and login** use the same panels, cards, badges and tables.
+
+**Verified:** `tsc` and `eslint` clean; signed in as a demo patient on the dev servers, asked about ICU visiting hours and got a "Policy answer" with 3 verified source cards; the records page loads profile, appointments, labs and bills. The Docker web image was rebuilt with the new UI.

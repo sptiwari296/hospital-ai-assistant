@@ -41,6 +41,7 @@ export interface ChatResponse {
   confirmation_id: string | null;
   escalation: { required: boolean; to: string[]; reason: string } | null;
   latency_ms: number;
+  model?: string | null;
 }
 
 export class ApiError extends Error {

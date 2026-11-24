@@ -1,17 +1,19 @@
 "use client";
 import { FormEvent, useEffect, useRef, useState } from "react";
 import AnswerCard from "@/components/AnswerCard";
-import { api, ChatResponse } from "@/services/api";
+import ResultsPanel from "@/components/ResultsPanel";
 import { useMe } from "@/hooks/useMe";
+import { api, ChatResponse } from "@/services/api";
 
-type Turn = { role: "user"; text: string } | { role: "assistant"; r: ChatResponse };
+type Turn = { role: "user"; text: string } | { role: "assistant"; r: ChatResponse; secs: number };
 
-const SUGGESTIONS = [
+const CHIPS = [
   "What are the ICU visiting hours?",
   "What is my latest HbA1c?",
   "Am I covered for knee replacement?",
   "Can I proceed with surgery next week?",
   "Reschedule my cardiology appointment",
+  "Do you treat snake bites?",
 ];
 
 export default function ChatPage() {
@@ -22,25 +24,32 @@ export default function ChatPage() {
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
-  const bottom = useRef<HTMLDivElement>(null);
+  const box = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    // braces matter: newer browsers return a Promise from scrollIntoView, and an effect must not return one
-    bottom.current?.scrollIntoView({ behavior: "smooth" });
+    // braces matter: an effect must not return the Promise that scroll APIs return in newer browsers
+    box.current?.scrollTo({ top: box.current.scrollHeight, behavior: "smooth" });
   }, [turns, busy]);
+
+  useEffect(() => {   // "New conversation" in the sidebar
+    const reset = () => { setTurns([]); setSessionId(null); setFailure(null); };
+    window.addEventListener("new-conversation", reset);
+    return () => window.removeEventListener("new-conversation", reset);
+  }, []);
 
   async function send(payload: { message?: string; decision?: "confirm" | "decline"; confirmation_id?: string },
                       shown: string) {
     setBusy(true);
     setFailure(null);
     setTurns((t) => [...t, { role: "user", text: shown }]);
+    const started = performance.now();
     try {
       const r = await api<ChatResponse>("/api/chat", {
         method: "POST",
         body: JSON.stringify({ message: "", ...payload, session_id: sessionId, patient_id: patientId }),
       });
       setSessionId(r.session_id);
-      setTurns((t) => [...t, { role: "assistant", r }]);
+      setTurns((t) => [...t, { role: "assistant", r, secs: (performance.now() - started) / 1000 }]);
     } catch (e) {
       setFailure((e as Error).message);
     } finally {
@@ -56,60 +65,74 @@ export default function ChatPage() {
     send({ message: text }, text);
   }
 
-  const last = [...turns].reverse().find((t) => t.role === "assistant") as { r: ChatResponse } | undefined;
+  const lastAssistant = [...turns].reverse().find((t) => t.role === "assistant") as
+    { r: ChatResponse } | undefined;
+  const needsPatient = me?.role === "staff" && !patientId;
 
-  if (error) return <p className="text-red-600">{error}</p>;
-  if (!me) return <p className="text-muted">Loading…</p>;
+  if (error) return <p style={{ color: "var(--bad)" }}>{error}</p>;
+  if (!me) return <p style={{ color: "var(--muted)" }}>Loading…</p>;
 
   return (
-    <div className="flex h-[calc(100vh-7rem)] flex-col">
+    <div>
+      <div className="hero">
+        <div className="eyebrow">CityCare · AI patient services assistant</div>
+        <h1>Answers you can <i>trust</i></h1>
+        <p>Ask about hospital policies or your own records. Every answer comes from approved documents or hospital systems, with its sources shown.</p>
+      </div>
+
       {me.role === "staff" && (
-        <div className="mb-3 flex items-center gap-2 text-sm">
-          <span className="text-muted">Patient:</span>
-          <select className="rounded border border-border bg-surface px-2 py-1" value={patientId ?? ""}
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12, maxWidth: 420 }}>
+          <span className="side-label">Patient</span>
+          <select className="input" value={patientId ?? ""}
             onChange={(e) => { setPatientId(e.target.value || null); setSessionId(null); setTurns([]); }}>
             <option value="">Select an assigned patient…</option>
-            {me.assigned_patients?.map((p) => (
-              <option key={p.patient_id} value={p.patient_id}>{p.patient_id} – {p.full_name}</option>
-            ))}
+            {me.assigned_patients?.map((p) => <option key={p.patient_id} value={p.patient_id}>{p.patient_id} · {p.full_name}</option>)}
           </select>
         </div>
       )}
 
-      <div className="flex-1 space-y-4 overflow-y-auto pb-4">
-        {turns.length === 0 && (
-          <div className="mt-8 text-center text-muted">
-            <p className="mb-4">Ask about hospital policies or your own records.</p>
-            <div className="flex flex-wrap justify-center gap-2">
-              {SUGGESTIONS.map((s) => (
-                <button key={s} onClick={() => send({ message: s }, s)} disabled={busy}
-                  className="rounded-full border border-border bg-surface px-3 py-1 text-sm hover:border-accent">{s}</button>
+      <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1.15fr) minmax(0,1fr)", gap: 32 }} className="chat-grid">
+        <div>
+          <div className="chat-box" ref={box}>
+            {turns.length === 0 && (
+              <div className="notice">
+                Ask me about the hospital or your care. For example: <i>which tests do I need before knee surgery?</i>
+              </div>
+            )}
+            {turns.map((t, i) =>
+              t.role === "user" ? (
+                <div key={i} className="msg">
+                  <div className="avatar user">🙂</div>
+                  <div className="msg-body"><div className="text" style={{ fontWeight: 500 }}>{t.text}</div></div>
+                </div>
+              ) : (
+                <AnswerCard key={i} r={t.r} secs={t.secs} busy={busy || t.r !== lastAssistant?.r}
+                  onOption={(n) => send({ message: String(n) }, `Option ${n}`)}
+                  onDecide={(d) => send({ decision: d, confirmation_id: t.r.confirmation_id ?? undefined },
+                    d === "confirm" ? "Confirm change" : "Keep as is")} />
               ))}
-            </div>
+            {busy && <div className="typing">Thinking…</div>}
+            {failure && <div className="msg" style={{ borderColor: "rgba(248,113,113,.4)", color: "var(--bad)" }}>{failure}</div>}
           </div>
-        )}
-        {turns.map((t, i) =>
-          t.role === "user" ? (
-            <div key={i} className="ml-auto w-fit max-w-[80%] rounded-lg bg-accent px-4 py-2 text-white">{t.text}</div>
-          ) : (
-            <AnswerCard key={i} r={t.r} busy={busy || t.r !== last?.r}
-              onOption={(n) => send({ message: String(n) }, `Option ${n}`)}
-              onDecide={(d) => send({ decision: d, confirmation_id: t.r.confirmation_id ?? undefined },
-                d === "confirm" ? "Confirm change" : "Keep as is")} />
-          ))}
-        {busy && <p className="text-sm text-muted">Thinking…</p>}
-        {failure && <p className="text-sm text-red-600">{failure}</p>}
-        <div ref={bottom} />
+
+          <div style={{ color: "var(--muted)", fontSize: 13, margin: "12px 0 6px" }}>Try:</div>
+          <div className="chips">
+            {CHIPS.map((c) => (
+              <button key={c} className="btn" title={c} disabled={busy || needsPatient} onClick={() => send({ message: c }, c)}>{c}</button>
+            ))}
+          </div>
+        </div>
+
+        <ResultsPanel r={lastAssistant?.r ?? null} />
       </div>
 
-      <form onSubmit={submit} className="flex gap-2 border-t border-border pt-3">
-        <input value={input} onChange={(e) => setInput(e.target.value)} maxLength={2000}
-          placeholder="Type your question…" disabled={busy || (me.role === "staff" && !patientId)}
-          className="flex-1 rounded border border-border bg-surface px-3 py-2" />
-        <button disabled={busy || !input.trim()} className="rounded bg-accent px-4 py-2 font-medium text-white disabled:opacity-50">
-          Send
-        </button>
+      <form onSubmit={submit} className="chat-input">
+        <input value={input} onChange={(e) => setInput(e.target.value)} maxLength={2000} disabled={busy || needsPatient}
+          placeholder={needsPatient ? "Select a patient first" : "Ask about policies, appointments, labs, insurance…"} />
+        <button className="send" disabled={busy || !input.trim()} aria-label="Send">↑</button>
       </form>
+
+      <style>{`@media (max-width: 1100px) { .chat-grid { grid-template-columns: minmax(0,1fr) !important; } }`}</style>
     </div>
   );
 }
